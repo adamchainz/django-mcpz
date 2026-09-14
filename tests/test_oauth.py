@@ -4,6 +4,7 @@ import base64
 import contextlib
 import datetime as dt
 import hashlib
+import http.client
 import http.server
 import json
 import secrets
@@ -12,6 +13,7 @@ import ssl
 import subprocess
 import tempfile
 import threading
+import time
 from collections.abc import Iterator
 from http import HTTPStatus
 from io import StringIO
@@ -1199,16 +1201,35 @@ class OAuthServerTests(ServerTestCase, TestCase):
 @contextlib.contextmanager
 def local_https_server(
     routes: dict[str, tuple[int, bytes]],
-) -> Iterator[tuple[int, ssl.SSLContext]]:
+) -> Iterator[tuple[int, ssl.SSLContext, list[dict[str, str]]]]:
     """
     Serve fixed responses over TLS on a local port, for testing the fetcher.
 
-    Yields the port and a client context that trusts the server's
-    self-signed certificate for the name "localhost".
+    Yields the port, a client context that trusts the server's self-signed
+    certificate for the name "localhost", and a list that fills with the
+    headers of each request received. Three paths misbehave: "/slow" sends
+    one byte of a longer body and then stalls, "/stall" sends nothing and
+    stalls, and "/drop" closes the connection without responding.
     """
+    received: list[dict[str, str]] = []
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self) -> None:
+            received.append(dict(self.headers))
+            if self.path == "/slow":
+                self.send_response(200)
+                self.send_header("Content-Length", "100")
+                self.end_headers()
+                self.wfile.write(b"{")
+                self.wfile.flush()
+                time.sleep(0.5)
+                return
+            if self.path == "/stall":
+                time.sleep(0.5)
+                return
+            if self.path == "/drop":
+                self.close_connection = True
+                return
             status, body = routes[self.path]
             self.send_response(status)
             if status == 302:
@@ -1248,12 +1269,12 @@ def local_https_server(
         server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         server_context.load_cert_chain(cert, key)
         client_context = ssl.create_default_context(cafile=cert)
-        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         server.socket = server_context.wrap_socket(server.socket, server_side=True)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            yield server.server_port, client_context
+            yield server.server_port, client_context, received
         finally:
             server.shutdown()
             server.server_close()
@@ -1461,7 +1482,7 @@ class MetadataDocumentTests(TestCase):
     def test_fetch_over_tls(self):
         routes = {"/doc": (200, b"{}"), "/moved": (302, b""), "/missing": (404, b"")}
 
-        with local_https_server(routes) as (port, context):
+        with local_https_server(routes) as (port, context, received):
             body = cimd._fetch("localhost", port, "127.0.0.1", "/doc", context=context)
             with pytest.raises(cimd.MetadataError, match="status 302"):
                 cimd._fetch("localhost", port, "127.0.0.1", "/moved", context=context)
@@ -1469,6 +1490,28 @@ class MetadataDocumentTests(TestCase):
                 cimd._fetch("localhost", port, "127.0.0.1", "/missing", context=context)
 
         assert body == b"{}"
+        assert received[0]["Accept"] == "application/json"
+        assert received[0]["Accept-Encoding"] == "identity"
+
+    def test_fetch_deadline(self):
+        with (
+            local_https_server({}) as (port, context, _),
+            mock.patch.object(cimd, "TIMEOUT_SECONDS", 0.2),
+        ):
+            # A body that stops arriving is cut short.
+            with pytest.raises(cimd.MetadataError, match="took over 0.2 seconds"):
+                cimd._fetch("localhost", port, "127.0.0.1", "/slow", context=context)
+            # A response that never starts is abandoned.
+            with pytest.raises(cimd.MetadataError, match="took over 0.2 seconds"):
+                cimd._fetch("localhost", port, "127.0.0.1", "/stall", context=context)
+
+    def test_fetch_dropped(self):
+        # Other connection errors pass through, for fetch_document to report.
+        with (
+            local_https_server({}) as (port, context, _),
+            pytest.raises(http.client.RemoteDisconnected),
+        ):
+            cimd._fetch("localhost", port, "127.0.0.1", "/drop", context=context)
 
     def test_resolve_public_address(self):
         results = [

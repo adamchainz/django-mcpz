@@ -5,16 +5,18 @@ A client identifies itself with an HTTPS URL, and the authorization server
 fetches a JSON document from it describing the client. Fetching a URL the
 client chose is the one place this app makes outbound requests, so the
 fetch is guarded: HTTPS only, public addresses only, resolved once and
-connected to directly, no redirects, a short timeout, and a size cap.
+connected to directly, no redirects, a deadline, and a size cap.
 """
 
 from __future__ import annotations
 
+import contextlib
 import http.client
 import ipaddress
 import json
 import socket
 import ssl
+import threading
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -119,16 +121,49 @@ def _fetch(
         timeout=TIMEOUT_SECONDS,
         context=context or ssl.create_default_context(),
     )
+    # The socket timeout applies to each operation, so a server that sends a
+    # byte at a time could hold the request open for hours. A timer shuts
+    # the connection at a wall-clock deadline instead.
+    timed_out = threading.Event()
+
+    def abort() -> None:
+        timed_out.set()
+        with contextlib.suppress(OSError, AttributeError):
+            connection.sock.shutdown(socket.SHUT_RDWR)
+
+    timer = threading.Timer(TIMEOUT_SECONDS, abort)
+    timer.start()
+    expired = False
     try:
-        connection.request("GET", path, headers={"Accept": "application/json"})
+        connection.request(
+            "GET",
+            path,
+            # Uncompressed, so the size cap applies to the bytes received.
+            headers={"Accept": "application/json", "Accept-Encoding": "identity"},
+        )
         response = connection.getresponse()
         if response.status != http.HTTPStatus.OK:
             raise MetadataError(
                 f"Client metadata document responded with status {response.status}."
             )
-        return response.read(MAX_BYTES + 1)
+        body = response.read(MAX_BYTES + 1)
+    except (OSError, http.client.HTTPException) as exc:
+        # Shutting the connection surfaces as an error or as a short read,
+        # depending on where the server had got to. A socket timeout means
+        # the deadline has passed as well, the two being the same length,
+        # and either may win the race to end a stalled operation.
+        expired = timed_out.is_set() or isinstance(exc, TimeoutError)
+        if not expired:
+            raise
+        body = b""
     finally:
+        timer.cancel()
         connection.close()
+    if expired or timed_out.is_set():
+        raise MetadataError(
+            f"Client metadata document took over {TIMEOUT_SECONDS} seconds."
+        )
+    return body
 
 
 def fetch_document(url: str) -> dict[str, Any]:
