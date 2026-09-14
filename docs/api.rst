@@ -168,6 +168,7 @@ Servers
 
         * a ``str`` becomes a single text content block.
         * ``None`` becomes an empty content list.
+        * A content block, one of :class:`Text`, :class:`Image`, :class:`Audio`, :class:`ResourceLink`, or :class:`EmbeddedResource`, or a list of them, becomes the content list as given.
         * Any other value becomes the result’s ``structuredContent``, plus its JSON serialization as a text content block for backwards compatibility, per the specification.
           Values are serialized with msgspec, so tools can return anything it supports, including ``dataclasses`` and msgspec ``Struct`` types.
 
@@ -226,6 +227,28 @@ Servers
 
     :param theme:
         Optionally ``"light"`` or ``"dark"``, if the icon is designed for one background.
+
+.. class:: Text(text)
+
+    A text content block, for returning alongside other blocks.
+    On its own, returning a ``str`` does the same.
+
+.. class:: Image(data, mime_type)
+
+    An image content block, from the image’s ``bytes`` and MIME type, such as ``"image/png"``.
+
+.. class:: Audio(data, mime_type)
+
+    An audio content block, from the clip’s ``bytes`` and MIME type, such as ``"audio/wav"``.
+
+.. class:: ResourceLink(uri, name, title=None, description=None, mime_type=None, size=None)
+
+    A link to a resource the client may fetch, such as a file served by your site.
+    ``uri`` and ``name`` are required; ``size`` is in bytes.
+
+.. class:: EmbeddedResource(uri, text=None, blob=None, mime_type=None)
+
+    The contents of a resource, included in the result: its ``text``, or its ``bytes`` as ``blob``, exactly one of the two, identified by ``uri``.
 
 .. function:: public(request)
 

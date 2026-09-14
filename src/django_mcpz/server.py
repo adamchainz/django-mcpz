@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import contextlib
 import logging
 import mimetypes
@@ -116,6 +117,109 @@ class Icon:
         return icon
 
 
+class Content:
+    """
+    A content block for a tool result. Return one, or a list of them, from a
+    tool function to send content other than text or structured output.
+    """
+
+    def to_dict(self) -> dict[str, Any]:
+        raise NotImplementedError  # pragma: no cover
+
+
+@dataclass(frozen=True)
+class Text(Content):
+    """A text block, for mixing with other content."""
+
+    text: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"type": "text", "text": self.text}
+
+
+@dataclass(frozen=True)
+class Image(Content):
+    """An image, from its bytes."""
+
+    data: bytes
+    mime_type: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": "image",
+            "data": base64.b64encode(self.data).decode(),
+            "mimeType": self.mime_type,
+        }
+
+
+@dataclass(frozen=True)
+class Audio(Content):
+    """An audio clip, from its bytes."""
+
+    data: bytes
+    mime_type: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": "audio",
+            "data": base64.b64encode(self.data).decode(),
+            "mimeType": self.mime_type,
+        }
+
+
+@dataclass(frozen=True)
+class ResourceLink(Content):
+    """A link to a resource the client may fetch, such as a URL on this site."""
+
+    uri: str
+    name: str
+    title: str | None = None
+    description: str | None = None
+    mime_type: str | None = None
+    size: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        block: dict[str, Any] = {
+            "type": "resource_link",
+            "uri": self.uri,
+            "name": self.name,
+        }
+        if self.title is not None:
+            block["title"] = self.title
+        if self.description is not None:
+            block["description"] = self.description
+        if self.mime_type is not None:
+            block["mimeType"] = self.mime_type
+        if self.size is not None:
+            block["size"] = self.size
+        return block
+
+
+@dataclass(frozen=True)
+class EmbeddedResource(Content):
+    """The contents of a resource, as text or bytes, identified by a URI."""
+
+    uri: str
+    text: str | None = None
+    blob: bytes | None = None
+    mime_type: str | None = None
+
+    def __post_init__(self) -> None:
+        if (self.text is None) == (self.blob is None):
+            raise ValueError("EmbeddedResource needs exactly one of text or blob.")
+
+    def to_dict(self) -> dict[str, Any]:
+        resource: dict[str, Any] = {"uri": self.uri}
+        if self.mime_type is not None:
+            resource["mimeType"] = self.mime_type
+        if self.text is not None:
+            resource["text"] = self.text
+        else:
+            assert self.blob is not None  # __post_init__ requires one of the two
+            resource["blob"] = base64.b64encode(self.blob).decode()
+        return {"type": "resource", "resource": resource}
+
+
 @dataclass(frozen=True)
 class Tool:
     name: str
@@ -179,6 +283,16 @@ def _tool_result(output: Any) -> dict[str, Any]:
         result["content"] = []
     elif isinstance(output, str):
         result["content"] = [{"type": "text", "text": output}]
+    elif isinstance(output, Content):
+        result["content"] = [output.to_dict()]
+    elif isinstance(output, (list, tuple)) and any(
+        isinstance(item, Content) for item in output
+    ):
+        if not all(isinstance(item, Content) for item in output):
+            raise TypeError(
+                "A tool returning content blocks must return only content blocks."
+            )
+        result["content"] = [item.to_dict() for item in output]
     else:
         encoded = msgspec.json.encode(output, enc_hook=enc_hook)
         result["content"] = [{"type": "text", "text": encoded.decode()}]

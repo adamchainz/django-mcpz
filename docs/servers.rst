@@ -109,6 +109,7 @@ Tool parameters are defined by a msgspec-supported type, typically a `msgspec St
     ) -> SearchResult: ...  # params is a validated SearchParams instance
 
 The return annotation, when it is a ``msgspec.Struct`` type like ``SearchResult`` here, doubles as the ``output_schema``.
+Tools can also return images, audio, and resources, as content blocks such as :class:`Image`, covered under :meth:`MCPServer.tool`.
 A tool with no parameters is a function taking only the request, declaring an empty schema:
 
 .. code-block:: python

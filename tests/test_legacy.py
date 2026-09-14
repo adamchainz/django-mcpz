@@ -130,7 +130,7 @@ class LegacyTests(ServerTestCase):
         response = self.legacy_post("tools/list", version="2025-11-25")
 
         result = self.assert_legacy_result(response)
-        assert len(result["tools"]) == 13
+        assert len(result["tools"]) == 16
 
     def test_tools_call(self):
         response = self.legacy_post(

@@ -29,8 +29,11 @@ from django_mcpz.server import (
     HEADER_MISMATCH,
     PROTOCOL_VERSION,
     UNSUPPORTED_PROTOCOL_VERSION,
+    Audio,
+    EmbeddedResource,
     Icon,
     MCPServer,
+    ResourceLink,
     public,
 )
 from tests import mcp
@@ -435,6 +438,9 @@ class ToolsListTests(ServerTestCase):
             "add_typed",
             "segment_length",
             "shout",
+            "picture",
+            "report_link",
+            "mixed_content",
             "sig_noop",
         ]
 
@@ -497,6 +503,42 @@ class ToolsCallTests(ServerTestCase):
         assert result["isError"] is False
         assert result["content"] == []
         assert "structuredContent" not in result
+
+    def test_content_list_result(self):
+        response = self.call("picture")
+
+        result = self.assert_result(response)
+        assert result["isError"] is False
+        assert result["content"] == [
+            {"type": "text", "text": "A single grey pixel."},
+            {"type": "image", "data": "iVBORw0KGgo=", "mimeType": "image/png"},
+        ]
+        assert "structuredContent" not in result
+
+    def test_content_result(self):
+        response = self.call("report_link")
+
+        result = self.assert_result(response)
+        assert result["content"] == [
+            {
+                "type": "resource_link",
+                "uri": "https://example.com/reports/1.pdf",
+                "name": "Report 1",
+                "mimeType": "application/pdf",
+            }
+        ]
+        assert "structuredContent" not in result
+
+    def test_mixed_content_result(self):
+        with self.assertLogs("django_mcpz", level="ERROR") as logs:
+            response = self.call("mixed_content")
+
+        result = self.assert_result(response)
+        assert result["isError"] is True
+        assert result["content"] == [
+            {"type": "text", "text": "Tool 'mixed_content' failed unexpectedly."}
+        ]
+        assert "must return only content blocks" in logs.output[0]
 
     def test_tool_error(self):
         response = self.call("unavailable")
@@ -1151,6 +1193,72 @@ class ToolAutocommitTests(ServerTestCase, TransactionTestCase):
         result = self.assert_result(response)
         assert result["isError"] is False
         assert Widget.objects.count() == 1
+
+
+class ContentTests(SimpleTestCase):
+    def test_audio(self):
+        assert Audio(b"RIFF", "audio/wav").to_dict() == {
+            "type": "audio",
+            "data": "UklGRg==",
+            "mimeType": "audio/wav",
+        }
+
+    def test_resource_link_minimal(self):
+        link = ResourceLink(uri="https://example.com/a.txt", name="a.txt")
+
+        assert link.to_dict() == {
+            "type": "resource_link",
+            "uri": "https://example.com/a.txt",
+            "name": "a.txt",
+        }
+
+    def test_resource_link_all_fields(self):
+        link = ResourceLink(
+            uri="https://example.com/a.txt",
+            name="a.txt",
+            title="A",
+            description="A file.",
+            mime_type="text/plain",
+            size=1,
+        )
+
+        assert link.to_dict() == {
+            "type": "resource_link",
+            "uri": "https://example.com/a.txt",
+            "name": "a.txt",
+            "title": "A",
+            "description": "A file.",
+            "mimeType": "text/plain",
+            "size": 1,
+        }
+
+    def test_embedded_resource_text(self):
+        resource = EmbeddedResource(
+            uri="file:///a.txt", text="hi", mime_type="text/plain"
+        )
+
+        assert resource.to_dict() == {
+            "type": "resource",
+            "resource": {
+                "uri": "file:///a.txt",
+                "mimeType": "text/plain",
+                "text": "hi",
+            },
+        }
+
+    def test_embedded_resource_blob(self):
+        resource = EmbeddedResource(uri="file:///a.bin", blob=b"\x00\x01")
+
+        assert resource.to_dict() == {
+            "type": "resource",
+            "resource": {"uri": "file:///a.bin", "blob": "AAE="},
+        }
+
+    def test_embedded_resource_needs_one(self):
+        with pytest.raises(ValueError, match="exactly one of text or blob"):
+            EmbeddedResource(uri="file:///a")
+        with pytest.raises(ValueError, match="exactly one of text or blob"):
+            EmbeddedResource(uri="file:///a", text="hi", blob=b"hi")
 
 
 class ToolNameTests(SimpleTestCase):
