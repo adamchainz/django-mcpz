@@ -26,13 +26,19 @@ Then pass its authentication callable to your server:
     from django_mcpz.server import MCPServer
     from django_mcpz.bearer_tokens.auth import token_auth
 
-    server = MCPServer(name="shop", version="1.0.0", auth=token_auth)
+    server = MCPServer(
+        name="shop",
+        version="1.0.0",
+        auth=token_auth,
+    )
 
-Create bearer tokens with the ``mcpz bearer-tokens create`` management command, which prints the token value once, or in the admin, which shows it once in a message:
+Create bearer tokens with the ``mcpz bearer-tokens create`` management command, which takes a name for the token and a user to associate it with and prints the token value once:
 
 .. code-block:: sh
 
     python manage.py mcpz bearer-tokens create "Claude Code" --user alice
+
+Alternatively, you can create tokens in the admin, which shows the token value once in a message at the top of the page.
 
 Bearer tokens last until revoked by default.
 Pass ``--expires-in-days`` to the command, or set :attr:`~models.Token.expires_at` in the admin, for tokens that stop working on their own, at the cost of reissuing them:
