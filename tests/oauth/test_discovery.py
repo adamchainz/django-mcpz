@@ -15,20 +15,20 @@ class DiscoveryTests(SimpleTestCase):
     def test_issuer_path(self):
         assert discovery.issuer_path() == "/oauth"
 
-    def test_issuer_for(self):
+    def test_issuer_url(self):
         request = RequestFactory().get("/oauth/authorize", SERVER_NAME="TESTSERVER")
 
-        assert discovery.issuer_for(request) == ISSUER
+        assert discovery.issuer_url(request) == ISSUER
 
-    def test_mcp_server_at(self):
+    def test_resolve_mcp_server(self):
         from tests.mcp import oauth_server, server
 
-        assert discovery.mcp_server_at("/oauth-mcp") is oauth_server
-        assert discovery.mcp_server_at("/mcp") is server
-        assert discovery.mcp_server_at("/oauth/authorize") is None
-        assert discovery.mcp_server_at("/admin/") is None
-        assert discovery.mcp_server_at("/nope") is None
-        assert discovery.mcp_server_at("/") is None
+        assert discovery.resolve_mcp_server("/oauth-mcp") is oauth_server
+        assert discovery.resolve_mcp_server("/mcp") is server
+        assert discovery.resolve_mcp_server("/oauth/authorize") is None
+        assert discovery.resolve_mcp_server("/admin/") is None
+        assert discovery.resolve_mcp_server("/nope") is None
+        assert discovery.resolve_mcp_server("/") is None
 
     def test_validate_resource(self):
         assert discovery.validate_resource(RESOURCE) == RESOURCE

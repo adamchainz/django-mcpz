@@ -36,8 +36,8 @@ from django_mcpz.oauth.conf import (
 from django_mcpz.oauth.csp import frame_ancestors_none
 from django_mcpz.oauth.discovery import (
     canonical,
-    issuer_for,
-    mcp_server_at,
+    issuer_url,
+    resolve_mcp_server,
     validate_resource,
 )
 from django_mcpz.oauth.models import (
@@ -58,14 +58,14 @@ def protected_resource_metadata(
 ) -> HttpResponse:
     """RFC 9728: describe an MCP server and name its authorization server."""
     path = f"/{resource_path}"
-    server = mcp_server_at(path)
+    server = resolve_mcp_server(path)
     if server is None:
         raise Http404
     info = server.server_info
     return JsonResponse(
         {
             "resource": canonical(request.build_absolute_uri(path)),
-            "authorization_servers": [issuer_for(request)],
+            "authorization_servers": [issuer_url(request)],
             "bearer_methods_supported": ["header"],
             # Shown by clients when listing the connection, so the server's
             # display name where it has one.
@@ -80,7 +80,7 @@ def authorization_server_metadata(
     """RFC 8414: describe the authorization server's endpoints and features."""
     if f"/{issuer_path}".rstrip("/") != discovery.issuer_path():
         raise Http404
-    issuer = issuer_for(request)
+    issuer = issuer_url(request)
     document = {
         "issuer": issuer,
         "authorization_endpoint": f"{issuer}/authorize",
@@ -211,7 +211,7 @@ def _authorize(request: HttpRequest) -> HttpResponse:
         if state is not None:
             query["state"] = state
         query.update(fields)
-        query["iss"] = issuer_for(request)
+        query["iss"] = issuer_url(request)
         separator = "&" if urlsplit(redirect_uri).query else "?"
         return HttpResponseRedirect(redirect_uri + separator + urlencode(query))
 

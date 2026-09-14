@@ -4,7 +4,7 @@ from http import HTTPStatus
 
 from django.http import HttpRequest, HttpResponse
 
-from django_mcpz.oauth.discovery import resource_for, resource_metadata_url
+from django_mcpz.oauth.discovery import resource_metadata_url, resource_url
 from django_mcpz.oauth.models import AccessToken
 from django_mcpz.tokens import sha256_hex
 
@@ -19,7 +19,7 @@ def oauth_auth(request: HttpRequest) -> HttpResponse | None:
     Otherwise responds 401 with the challenge that points clients at the
     authorization server.
     """
-    resource = resource_for(request)
+    resource = resource_url(request)
     header = request.headers.get("Authorization", "")
     scheme, _, credential = header.partition(" ")
     credential = credential.strip()

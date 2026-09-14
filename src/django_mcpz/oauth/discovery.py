@@ -31,12 +31,12 @@ def issuer_path() -> str:
     return reverse("django_mcpz_oauth:authorize").removesuffix("/authorize")
 
 
-def issuer_for(request: HttpRequest) -> str:
+def issuer_url(request: HttpRequest) -> str:
     """The authorization server's URL, on the request's scheme and host."""
     return canonical(f"{request.scheme}://{request.get_host()}{issuer_path()}")
 
 
-def mcp_server_at(path: str) -> MCPServer | None:
+def resolve_mcp_server(path: str) -> MCPServer | None:
     """The MCPServer the path is routed to, if any."""
     try:
         match = resolve(path)
@@ -46,7 +46,7 @@ def mcp_server_at(path: str) -> MCPServer | None:
     return server if isinstance(server, MCPServer) else None
 
 
-def resource_for(request: HttpRequest) -> str:
+def resource_url(request: HttpRequest) -> str:
     """The resource URL of the MCP server handling the request."""
     return canonical(request.build_absolute_uri(request.path))
 
@@ -65,7 +65,7 @@ def validate_resource(resource: str) -> str | None:
         or not host_allowed(parts.hostname)
         or parts.query
         or parts.fragment
-        or mcp_server_at(parts.path) is None
+        or resolve_mcp_server(parts.path) is None
     ):
         return None
     return canonical(resource)
