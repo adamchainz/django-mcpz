@@ -37,7 +37,6 @@ release = version
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    "sphinx.ext.intersphinx",
     "sphinx.ext.viewcode",
     "sphinx_copybutton",
 ]
@@ -85,11 +84,9 @@ latex_documents = [
     ),
 ]
 
-# -- Options for Intersphinx -------------------------------------------
-
-intersphinx_mapping = {
-    "django": (
-        "https://docs.djangoproject.com/en/stable/",
-        "https://docs.djangoproject.com/en/stable/_objects/",
-    ),
-}
+def setup(app):
+    # A "setting" object type, like Django's own docs use, so settings get a
+    # directive, an index entry, and a :setting: role for cross-references.
+    app.add_object_type(
+        "setting", "setting", objname="setting", indextemplate="pair: %s; setting"
+    )
