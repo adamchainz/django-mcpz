@@ -9,7 +9,15 @@ from django.http import HttpRequest, HttpResponse
 
 from django_mcpz.bearer_tokens.auth import token_auth
 from django_mcpz.oauth.auth import oauth_auth
-from django_mcpz.server import Icon, MCPServer, ToolError, public
+from django_mcpz.server import (
+    Icon,
+    Image,
+    MCPServer,
+    ResourceLink,
+    Text,
+    ToolError,
+    public,
+)
 from tests.models import Widget
 
 server = MCPServer(
@@ -235,6 +243,25 @@ class ShoutResult(msgspec.Struct):
 )
 def shout(request: HttpRequest, params: ShoutParams) -> ShoutResult:
     return ShoutResult(text=" ".join([params.message.upper() + "!"] * params.times))
+
+
+@server.tool(description="A picture, with a caption.", read_only=True)
+def picture(request: HttpRequest) -> list[Text | Image]:
+    return [Text("A single grey pixel."), Image(b"\x89PNG\r\n\x1a\n", "image/png")]
+
+
+@server.tool(description="A link to a report.", read_only=True)
+def report_link(request: HttpRequest) -> ResourceLink:
+    return ResourceLink(
+        uri="https://example.com/reports/1.pdf",
+        name="Report 1",
+        mime_type="application/pdf",
+    )
+
+
+@server.tool(description="Content blocks mixed with other values.")
+def mixed_content(request: HttpRequest) -> list[Any]:
+    return [Text("Half a result."), 1]
 
 
 @server.tool(description="Do nothing, with a generated empty schema.")

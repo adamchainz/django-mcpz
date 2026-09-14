@@ -84,6 +84,9 @@ class MCPClientTests(SimpleTestCase):
             "add_typed",
             "segment_length",
             "shout",
+            "picture",
+            "report_link",
+            "mixed_content",
             "sig_noop",
         ]
         add = result.tools[0]
