@@ -59,6 +59,8 @@ Cleanup
 Both the bearer tokens app and the OAuth app provide ways to clean up expired and revoked tokens from your database, similar to Django’s |clearsessions|__ management command for its session model.
 Pick your flavour: either as a task for Django’s |tasks framework|__, or as a management command for running from cron (or whatever).
 
+.. |clearsessions| replace:: ``clearsessions``
+__ https://docs.djangoproject.com/en/stable/ref/django-admin/#clearsessions
 .. |tasks framework| replace:: tasks framework
 __ https://docs.djangoproject.com/en/stable/topics/tasks/
 
