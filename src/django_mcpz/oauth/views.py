@@ -7,8 +7,6 @@ import json
 import re
 import secrets
 import time
-from collections.abc import Callable
-from functools import wraps
 from http import HTTPStatus
 from typing import Any
 from urllib.parse import urlencode, urlsplit
@@ -35,6 +33,7 @@ from django_mcpz.oauth.conf import (
     is_secure_url,
     oauth_settings,
 )
+from django_mcpz.oauth.csp import frame_ancestors_none
 from django_mcpz.oauth.discovery import (
     canonical,
     issuer_for,
@@ -160,20 +159,6 @@ def resolve_resource(resource: str | None) -> str:
             "invalid_target", f"Not an MCP server on this site: {resource!r}."
         )
     return validated
-
-
-def frame_ancestors_none(
-    view: Callable[..., HttpResponse],
-) -> Callable[..., HttpResponse]:
-    """Forbid framing the view's responses, with the CSP header."""
-
-    @wraps(view)
-    def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        response = view(request, *args, **kwargs)
-        response["Content-Security-Policy"] = "frame-ancestors 'none'"
-        return response
-
-    return wrapper
 
 
 # OAuth 2.1 section 7.10: the consent page must not be framed, so a hidden

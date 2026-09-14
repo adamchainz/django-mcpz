@@ -122,6 +122,10 @@ The two pages are rendered from three templates:
 Override them as you would any app’s templates, as covered in |Overriding templates|__: put files of the same names in a directory listed in your ``TEMPLATES`` setting’s ``DIRS``, or in an app listed before ``django_mcpz.oauth`` in ``INSTALLED_APPS``.
 To restyle both pages at once, override only the base template, for example with one that extends your site’s own base template and fills in its blocks.
 The pages are served with a ``Content-Security-Policy`` header of ``frame-ancestors 'none'``, so they cannot be shown inside a frame on another page.
+On Django 6.0 and later with |ContentSecurityPolicyMiddleware|__ installed, the header is instead built from your ``SECURE_CSP`` policy with its ``frame-ancestors`` directive replaced, so the rest of your policy applies to the pages too.
+
+.. |ContentSecurityPolicyMiddleware| replace:: ``ContentSecurityPolicyMiddleware``
+__ https://docs.djangoproject.com/en/stable/ref/middleware/#module-django.middleware.csp
 
 .. |Overriding templates| replace:: Overriding templates
 __ https://docs.djangoproject.com/en/stable/howto/overriding-templates/
