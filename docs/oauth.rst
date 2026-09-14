@@ -95,6 +95,8 @@ Setup
    .. |LoginView| replace:: ``LoginView``
    __ https://docs.djangoproject.com/en/stable/topics/auth/default/#django.contrib.auth.views.LoginView
 
+6. Schedule the cleanup of expired codes and tokens, as covered in :ref:`cleanup`.
+
 Then add your server’s URL to the assistant as a connector, and it will take you through the login and consent pages.
 
 The consent page

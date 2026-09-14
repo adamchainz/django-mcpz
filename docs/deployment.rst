@@ -56,15 +56,16 @@ __ https://docs.djangoproject.com/en/stable/ref/settings/#allowed-hosts
 Cleanup
 -------
 
-Both the bearer tokens app and the OAuth app provide their cleanup as a sub-command of the ``mcpz`` management command, for running from cron, and as a task for Django’s |tasks framework|__, on Django 6.0 and later:
+Both the bearer tokens app and the OAuth app provide ways to clean up expired and revoked tokens from your database, similar to Django’s |clearsessions|__ management command for its session model.
+Pick your flavour: either as a task for Django’s |tasks framework|__, or as a management command for running from cron (or whatever).
 
 .. |tasks framework| replace:: tasks framework
 __ https://docs.djangoproject.com/en/stable/topics/tasks/
 
-.. code-block:: sh
+Tasks
+^^^^^
 
-    python manage.py mcpz bearer-tokens clear
-    python manage.py mcpz oauth clear
+You can import and run the tasks like so:
 
 .. code-block:: python
 
@@ -74,8 +75,10 @@ __ https://docs.djangoproject.com/en/stable/topics/tasks/
     clear_expired_bearer_tokens.enqueue()
     clear_expired_oauth.enqueue()
 
-The tasks framework runs tasks but does not schedule them.
-To run the cleanup on a schedule, use a scheduler for the framework, such as |django-scheduled-tasks|__, which wraps a task with a cron expression and runs it from its ``run_task_scheduler`` management command:
+Only import and run (or schedule) the tasks for the auth apps you’re using!
+
+For regular cleanup, schedule the tasks to run periodically.
+Django’s tasks framework does not currently provide a way to schedule tasks, so you’ll need a scheduler, such as |django-scheduled-tasks|__, which you can use like so:
 
 .. |django-scheduled-tasks| replace:: ``django-scheduled-tasks``
 __ https://github.com/lode-braced/django-scheduled-tasks
@@ -91,4 +94,16 @@ __ https://github.com/lode-braced/django-scheduled-tasks
     cron_task(cron_schedule="0 4 * * *")(clear_expired_oauth)
 
 Put that in a module your project imports at startup, such as an app’s ``tasks.py``, so the schedules are registered.
-Once a day is plenty: nothing depends on expired rows being gone, and the tables grow by one row per login or refresh.
+Daily execution as above should be fine, unless you’re at a hugemongous scale.
+
+Management commands
+^^^^^^^^^^^^^^^^^^^
+
+Use these management commands to clear expired and revoked tokens from the database:
+
+.. code-block:: sh
+
+    python manage.py mcpz bearer-tokens clear
+    python manage.py mcpz oauth clear
+
+Again, it’s best to schedule the relevant command(s) to run daily, such as with cron, Systemd timers, or whatever your deployment uses for scheduled tasks.
