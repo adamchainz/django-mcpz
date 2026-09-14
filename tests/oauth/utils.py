@@ -111,7 +111,10 @@ class TokenTestCase(TestCase):
         return body
 
 
-PUBLIC_ADDRESS = "93.184.216.34"
+# From the RFC 5737 range set aside for documentation, for tests that mock
+# resolution. Python classes these ranges as non-public, so the real check
+# would refuse it, as tests of that check must bear in mind.
+PUBLIC_ADDRESS = "203.0.113.10"
 
 
 def mock_metadata_fetch(document: Any, *, body: bytes | None = None) -> Any:

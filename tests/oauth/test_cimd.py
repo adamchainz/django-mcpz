@@ -331,21 +331,22 @@ class MetadataDocumentTests(TestCase):
             cimd._fetch("localhost", port, "127.0.0.1", "/drop", context=context)
 
     def test_resolve_public_address(self):
+        # Real public addresses, since the documentation ranges are refused.
         results = [
-            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.1.1.1", 443)),
             (
                 socket.AF_INET6,
                 socket.SOCK_STREAM,
                 6,
                 "",
-                ("2606:2800:21f:cb07::1", 443, 0, 0),
+                ("2606:4700:4700::1111", 443, 0, 0),
             ),
         ]
 
         with mock.patch.object(socket, "getaddrinfo", return_value=results):
             address = cimd.resolve_public_address("client.example", 443)
 
-        assert address == "93.184.216.34"
+        assert address == "1.1.1.1"
 
     def test_resolve_public_address_scoped(self):
         results = [
@@ -360,7 +361,7 @@ class MetadataDocumentTests(TestCase):
 
     def test_resolve_public_address_private(self):
         results = [
-            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.1.1.1", 443)),
             (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.1", 443)),
         ]
 
