@@ -5,6 +5,9 @@ from http import HTTPStatus
 from typing import Any
 from unittest import mock
 
+from django.contrib.auth.models import User
+from django.db import connection
+from django.test import TransactionTestCase
 from django.utils import timezone
 
 from django_mcpz.oauth import cimd
@@ -20,7 +23,9 @@ from tests.oauth.utils import (
     REDIRECT_URI,
     RESOURCE,
     TokenTestCase,
+    make_access_token,
     make_client,
+    make_code,
 )
 
 
@@ -260,3 +265,35 @@ class TokenRefreshTests(TokenTestCase):
         response = self.refresh(first["refresh_token"])
 
         self.assert_token_error(response, "invalid_grant")
+
+
+class AtomicRequestsTests(TransactionTestCase):
+    """
+    Under ATOMIC_REQUESTS, the writes behind an error response still commit,
+    since the view returns rather than raises: a replayed code revokes its
+    family for good.
+    """
+
+    def test_reuse_revocation_committed(self):
+        user = User.objects.create_user("alice")
+        oauth_client = make_client(name="Claude")
+        code, value, verifier = make_code(client=oauth_client, user=user)
+        access, _ = make_access_token(user=user, client=oauth_client, code=code)
+        code.used_at = timezone.now()
+        code.save()
+
+        with mock.patch.dict(connection.settings_dict, {"ATOMIC_REQUESTS": True}):
+            response = self.client.post(
+                "/oauth/token",
+                {
+                    "grant_type": "authorization_code",
+                    "client_id": oauth_client.client_id,
+                    "code": value,
+                    "code_verifier": verifier,
+                },
+            )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        assert response.json()["error"] == "invalid_grant"
+        access.refresh_from_db()
+        assert access.revoked_at is not None

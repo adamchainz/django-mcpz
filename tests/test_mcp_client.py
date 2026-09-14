@@ -76,6 +76,7 @@ class MCPClientTests(SimpleTestCase):
             "greet",
             "unavailable",
             "crash",
+            "create_widget",
             "noop",
             "unencodable",
             "regional",

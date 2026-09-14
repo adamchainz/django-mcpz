@@ -28,7 +28,7 @@ Some things to keep in mind:
   Data your application stores, such as free text from other users, can contain instructions that try to steer the model.
   Keep tools narrow, return only the fields the model needs, and prefer structured output over pasting whole documents.
 
-* Each |tools/call|__ runs in the request like a normal view, so |ATOMIC_REQUESTS|__ applies to it, and a tool that raises rolls back if that setting is on.
+* Each |tools/call|__ runs in the request like a normal view, so |ATOMIC_REQUESTS|__ applies to it: with that setting on, a tool that raises has its writes rolled back, and the error result is still returned.
   Without it, a tool that makes several writes should wrap them in |transaction.atomic()|__ itself.
 
 * Requests carrying an ``Origin`` header from a host outside |ALLOWED_HOSTS|__ are rejected, so a web page cannot make a browser call your server with its cookies, as covered in :ref:`server-protocol-support`.

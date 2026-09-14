@@ -10,6 +10,7 @@ from django.http import HttpRequest, HttpResponse
 from django_mcpz.bearer_tokens.auth import token_auth
 from django_mcpz.oauth.auth import oauth_auth
 from django_mcpz.server import Icon, MCPServer, ToolError, public
+from tests.models import Widget
 
 server = MCPServer(
     name="example-server",
@@ -72,6 +73,24 @@ def unavailable(request: HttpRequest, arguments: dict[str, Any]) -> None:
 )
 def crash(request: HttpRequest, arguments: dict[str, Any]) -> None:
     raise ValueError("secret internal details")
+
+
+@server.tool(
+    description="Create a widget, then finish as asked, for transaction tests.",
+    input_schema={
+        "type": "object",
+        "properties": {"then": {"type": "string", "enum": ["ok", "error", "crash"]}},
+        "required": ["then"],
+        "additionalProperties": False,
+    },
+)
+def create_widget(request: HttpRequest, arguments: dict[str, Any]) -> str:
+    Widget.objects.create(name="pending", price=1)
+    if arguments["then"] == "error":
+        raise ToolError("Changed my mind.")
+    if arguments["then"] == "crash":
+        raise ValueError("boom")
+    return "Created."
 
 
 @server.tool(

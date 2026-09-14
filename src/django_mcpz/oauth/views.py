@@ -536,8 +536,9 @@ def revoke(request: HttpRequest) -> HttpResponse:
         if refresh.code is not None:
             refresh.code.revoke_family()
         else:
-            refresh.revoke()
-            refresh.access_token.revoke()
+            with transaction.atomic():
+                refresh.revoke()
+                refresh.access_token.revoke()
     else:
         access = AccessToken.objects.filter(digest=digest).first()
         if access is not None and access.client_id == client.pk:

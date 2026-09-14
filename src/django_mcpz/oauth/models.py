@@ -5,7 +5,7 @@ from typing import Any, TypeVar
 from urllib.parse import urlsplit
 
 from django.conf import settings
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -110,12 +110,13 @@ class AuthorizationCode(models.Model):
     def revoke_family(self) -> None:
         """Revoke every token issued from this code."""
         now = timezone.now()
-        AccessToken.objects.filter(code=self, revoked_at__isnull=True).update(
-            revoked_at=now
-        )
-        RefreshToken.objects.filter(code=self, revoked_at__isnull=True).update(
-            revoked_at=now
-        )
+        with transaction.atomic():
+            AccessToken.objects.filter(code=self, revoked_at__isnull=True).update(
+                revoked_at=now
+            )
+            RefreshToken.objects.filter(code=self, revoked_at__isnull=True).update(
+                revoked_at=now
+            )
 
 
 TokenT = TypeVar("TokenT", bound="Token")

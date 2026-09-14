@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 import mimetypes
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from http import HTTPStatus
 from typing import Any, Literal
@@ -13,6 +14,7 @@ import msgspec
 import msgspec.json
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
+from django.db import connections, transaction
 from django.http import HttpRequest, HttpResponse, HttpResponseNotAllowed
 from django.http.request import validate_host
 from django.templatetags.static import static as static_url
@@ -149,6 +151,21 @@ def _tool_definition(tool: Tool, request: HttpRequest) -> dict[str, Any]:
             for icon in tool.icons
         ],
     }
+
+
+@contextlib.contextmanager
+def _savepoints() -> Iterator[None]:
+    """
+    Run a tool in a savepoint on each open transaction, as under
+    ATOMIC_REQUESTS, so that a tool that raises leaves no writes behind while
+    the request's transaction stays usable for the error result. Without an
+    open transaction, autocommit applies, as for any view.
+    """
+    with contextlib.ExitStack() as stack:
+        for connection in connections.all(initialized_only=True):
+            if connection.in_atomic_block:
+                stack.enter_context(transaction.atomic(using=connection.alias))
+        yield
 
 
 def _tool_result(output: Any) -> dict[str, Any]:
@@ -606,11 +623,12 @@ class MCPServer:
                 )
 
         try:
-            if tool.takes_params:
-                output = tool.func(request, tool_arguments)
-            else:
-                output = tool.func(request)
-            result = _tool_result(output)
+            with _savepoints():
+                if tool.takes_params:
+                    output = tool.func(request, tool_arguments)
+                else:
+                    output = tool.func(request)
+                result = _tool_result(output)
         except ToolError as exc:
             return self._tool_error(request_id, str(exc)), "tool_error"
         except Exception:

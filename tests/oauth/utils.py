@@ -53,6 +53,19 @@ def make_access_token(
     return AccessToken.create(client=client, user=user, **fields)
 
 
+def make_code(**fields: Any) -> tuple[AuthorizationCode, str, str]:
+    """Create an authorization code, returning it, its value, and the verifier."""
+    verifier, challenge = pkce_pair()
+    value = "mcp_code_" + secrets.token_urlsafe(16)
+    fields.setdefault("redirect_uri", REDIRECT_URI)
+    fields.setdefault("resource", RESOURCE)
+    fields.setdefault("expires_at", timezone.now() + dt.timedelta(minutes=5))
+    code = AuthorizationCode.objects.create(
+        digest=sha256_hex(value), code_challenge=challenge, **fields
+    )
+    return code, value, verifier
+
+
 class TokenTestCase(TestCase):
     user: User
     oauth_client: Client
@@ -63,17 +76,9 @@ class TokenTestCase(TestCase):
         cls.oauth_client = make_client(name="Claude")
 
     def make_code(self, **fields: Any) -> tuple[AuthorizationCode, str, str]:
-        verifier, challenge = pkce_pair()
-        value = "mcp_code_" + secrets.token_urlsafe(16)
         fields.setdefault("client", self.oauth_client)
         fields.setdefault("user", self.user)
-        fields.setdefault("redirect_uri", REDIRECT_URI)
-        fields.setdefault("resource", RESOURCE)
-        fields.setdefault("expires_at", timezone.now() + dt.timedelta(minutes=5))
-        code = AuthorizationCode.objects.create(
-            digest=sha256_hex(value), code_challenge=challenge, **fields
-        )
-        return code, value, verifier
+        return make_code(**fields)
 
     def post_token(self, **data: Any) -> Any:
         data.setdefault("client_id", self.oauth_client.client_id)
