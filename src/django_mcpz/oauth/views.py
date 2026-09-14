@@ -51,7 +51,7 @@ from django_mcpz.oauth.models import (
     digest_of,
 )
 
-# -- Metadata documents
+# Metadata documents
 
 
 def protected_resource_metadata(
@@ -101,7 +101,7 @@ def authorization_server_metadata(
     return JsonResponse(document)
 
 
-# -- Authorization endpoint
+# Authorization endpoint
 
 
 # RFC 7636: a challenge is base64url, and an S256 one is 43 characters. The
@@ -267,7 +267,7 @@ def _authorize(request: HttpRequest) -> HttpResponse:
     return redirect(code=value)
 
 
-# -- Token endpoint
+# Token endpoint
 
 
 def token_error(
@@ -429,7 +429,7 @@ def issue_tokens(
     return JsonResponse(body, headers={"Cache-Control": "no-store"})
 
 
-# -- Dynamic client registration
+# Dynamic client registration
 
 
 class RegistrationError(Exception):
@@ -511,7 +511,7 @@ def register(request: HttpRequest) -> HttpResponse:
     )
 
 
-# -- Revocation
+# Revocation
 
 
 @csrf_exempt

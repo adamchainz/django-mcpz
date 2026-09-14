@@ -299,7 +299,7 @@ def token_widget_tool(request: HttpRequest) -> str:
     return "widgets"
 
 
-# -- OAuth
+# OAuth
 
 oauth_server = MCPServer(
     name="oauth-server", version="1.0.0", title="OAuth server", auth=oauth_auth

@@ -221,7 +221,7 @@ class MCPServer:
             self.supported_versions.extend(LEGACY_PROTOCOL_VERSIONS)
         self._tools: dict[str, Tool] = {}
 
-    # -- Tool registration
+    # Tool registration
 
     def tool(
         self,
@@ -322,7 +322,7 @@ class MCPServer:
 
         return decorator
 
-    # -- The view
+    # The view
 
     # MCP clients are not browsers and authenticate per-request, so the
     # server is exempt from CSRF checks.
@@ -492,7 +492,7 @@ class MCPServer:
             )
         return None
 
-    # -- Method handlers
+    # Method handlers
 
     def _discover(self, request_id: str | int) -> HttpResponse:
         result: dict[str, Any] = {
