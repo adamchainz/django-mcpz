@@ -27,12 +27,15 @@ Installation
        INSTALLED_APPS = [
            ...,
            "django_mcpz",
-           "django_mcpz.tokens",
            ...,
        ]
 
-   ``django_mcpz.tokens`` is optional.
-   It provides per-client tokens for authenticating MCP clients, the recommended way, and needs ``migrate`` running.
-   See :ref:`server-tokens`.
+   Depending on your use case, you may want to install one of the optional apps:
+
+   * ``django_mcpz.bearer_tokens``: provides per-client bearer tokens for authenticating MCP clients from developer tools.
+     See :ref:`server-bearer-tokens`.
+
+   * ``django_mcpz.oauth``: provides OAuth authentication for hosted assistants like Claude.ai and ChatGPT.
+     See :doc:`oauth`.
 
 Now you’re ready to make an MCP server object and route it, as covered in :doc:`servers`.

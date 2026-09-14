@@ -5,11 +5,20 @@ Servers
 
 An MCP server is what AI clients connect to: a set of tools, served at a single URL.
 In django-mcpz a server is a plain, POST-only, synchronous Django view: each request stands alone, like a call to any HTTP API, and gets one JSON response.
-django-mcpz speaks the current MCP protocol revision, 2026-07-28, and the “legacy” 2025 revisions too.
+django-mcpz speaks the current protocol, MCP version 2026-07-28, and the “legacy” 2025 versions too.
 See :ref:`server-protocol-support` and :ref:`server-legacy` for the details.
 
 Requests are `JSON-RPC <https://www.jsonrpc.org/specification>`__, a small convention for JSON POST bodies carrying a ``method`` name and ``params``.
-Clients send three kinds: ``server/discover`` asks what the server is and can do, ``tools/list`` asks which tools exist and how to call them, and ``tools/call`` runs one.
+Clients send three kinds: |server/discover|__ asks what the server is and can do, |tools/list|__ asks which tools exist and how to call them, and |tools/call|__ runs one.
+
+.. |server/discover| replace:: ``server/discover``
+__ https://modelcontextprotocol.io/specification/draft/server/discover
+
+.. |tools/list| replace:: ``tools/list``
+__ https://modelcontextprotocol.io/specification/draft/server/tools#listing-tools
+
+.. |tools/call| replace:: ``tools/call``
+__ https://modelcontextprotocol.io/specification/draft/server/tools#calling-tools
 
 Define a server by creating an :class:`MCPServer` instance, attaching tool functions with its :meth:`~MCPServer.tool` decorator, and routing the server itself as the view, at whatever URL you like.
 For example, in ``example/mcp.py``:
@@ -21,7 +30,7 @@ For example, in ``example/mcp.py``:
     import msgspec
 
     from django_mcpz.server import MCPServer
-    from django_mcpz.tokens.auth import token_auth
+    from django_mcpz.bearer_tokens.auth import token_auth
     from example.models import Order
 
     server = MCPServer(
@@ -67,7 +76,7 @@ Route the server in ``urls.py``:
     ]
 
 Every server needs an ``auth`` argument saying how callers are authenticated.
-The example uses the optional ``django_mcpz.tokens`` app, which authenticates clients with per-client tokens.
+The example uses the optional ``django_mcpz.bearer_tokens`` app, which authenticates clients with per-client bearer tokens.
 See :ref:`server-authentication`.
 
 .. _server-typed-schemas:
@@ -123,7 +132,15 @@ Icons
 -----
 
 Tools can carry icons for display in client user interfaces.
-The specification directs clients to reject icons from origins other than the server’s own, making Django’s static files their natural home: pass :class:`Icon` instances and django-mcpz resolves them to absolute URLs on the current host, per request, in ``tools/list`` responses.
+The specification directs clients to reject icons from origins other than the MCP server’s own, so icons have to be served by your site.
+
+If your site serves its own static files, with a relative |STATIC_URL|__ such as ``"/static/"``, as with |WhiteNoise|__, pass :class:`Icon` instances with ``static`` set.
+django-mcpz resolves them to absolute URLs on the current host, per request, in ``tools/list`` responses:
+
+.. |STATIC_URL| replace:: ``STATIC_URL``
+__ https://docs.djangoproject.com/en/stable/ref/settings/#static-url
+.. |WhiteNoise| replace:: WhiteNoise
+__ https://whitenoise.readthedocs.io/
 
 .. code-block:: python
 
@@ -146,11 +163,9 @@ The specification directs clients to reject icons from origins other than the se
     )
     def search(request, params: SearchParams): ...
 
-Plain ``dict``\s in the specification’s `icon format <https://modelcontextprotocol.io/specification/2026-07-28/basic/index#icons>`__ pass through unresolved, for ``data:`` URIs or externally hosted images (which clients may reject as cross-origin).
-If |STATIC_URL|__ points at a CDN on another origin, you can serve your icon with a simple view that returns |FileResponse|__:
+If ``STATIC_URL`` points at a CDN on another origin, static files will not do, since clients would reject them.
+Instead, serve the icon from a view on your site, such as one returning |FileResponse|__:
 
-.. |STATIC_URL| replace:: ``STATIC_URL``
-__ https://docs.djangoproject.com/en/stable/ref/settings/#static-url
 .. |FileResponse| replace:: ``FileResponse``
 __ https://docs.djangoproject.com/en/stable/ref/request-response/#django.http.FileResponse
 
@@ -172,11 +187,13 @@ __ https://docs.djangoproject.com/en/stable/ref/request-response/#django.http.Fi
         path("mcp/icons/search.png", search_icon),
     ]
 
-…and point the icon at that URL path instead of a static file:
+…and point the icon at that URL path with ``path`` instead of ``static``:
 
 .. code-block:: python
 
     Icon(path="/mcp/icons/search.png", sizes=("48x48",))
+
+Plain ``dict``\s in the specification’s `icon format <https://modelcontextprotocol.io/specification/2026-07-28/basic/index#icons>`__ pass through unresolved, for ``data:`` URIs or externally hosted images, which clients may reject as cross-origin.
 
 .. _server-authentication:
 
@@ -186,8 +203,10 @@ Authentication
 MCP servers expose application internals to network callers, so every server must say how it authenticates them, through the required ``auth`` argument.
 This is separate to Django’s own authentication, which is browser-oriented and session-based.
 
-The `MCP authorization specification <https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization>`__ defines full OAuth 2.1 resource server behaviour, which django-mcpz does not currently implement.
-Bearer tokens are a fine alternative for developer tools, most of which support them, but not for hosted assistants like Claude.ai and ChatGPT, as covered in :ref:`server-tokens-clients`.
+Two optional apps cover the common cases.
+Developer tools such as Claude Code accept a bearer token in their configuration, which the :doc:`bearer tokens <bearer_tokens>` app provides.
+Hosted assistants such as Claude.ai and ChatGPT connect through OAuth, which the :doc:`oauth <oauth>` app provides, implementing the `MCP authorization specification <https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization>`__.
+Any other scheme plugs in as a callable.
 
 .. _server-public:
 
@@ -204,20 +223,34 @@ Pass :func:`public`, which allows every request, if the server is protected some
 
 Be very sure you want to do this!
 
-Tokens
-~~~~~~
+Bearer tokens
+~~~~~~~~~~~~~
 
-The recommended way to authenticate MCP clients is with tokens from the optional ``django_mcpz.tokens`` app: one token per client, each acting as a user, revocable one at a time.
+For developer tools, which send a pasted credential, use bearer tokens from the optional ``django_mcpz.bearer_tokens`` app: one token per client, each acting as a user, revocable one at a time.
 Pass its authentication callable to your server:
 
 .. code-block:: python
 
     from django_mcpz.server import MCPServer
-    from django_mcpz.tokens.auth import token_auth
+    from django_mcpz.bearer_tokens.auth import token_auth
 
     server = MCPServer(name="shop", version="1.0.0", auth=token_auth)
 
-See :doc:`tokens` for setting up the app and creating tokens.
+See :doc:`bearer_tokens` for setting up the app and creating bearer tokens.
+
+OAuth
+~~~~~
+
+For hosted assistants, which take the user through a login and consent flow rather than accepting a pasted token, use the optional ``django_mcpz.oauth`` app’s callable:
+
+.. code-block:: python
+
+    from django_mcpz.oauth.auth import oauth_auth
+    from django_mcpz.server import MCPServer
+
+    server = MCPServer(name="shop", version="1.0.0", auth=oauth_auth)
+
+See :doc:`oauth` for setting up the app.
 
 Custom authentication
 ~~~~~~~~~~~~~~~~~~~~~
@@ -245,8 +278,7 @@ For example, trusting an authenticating reverse proxy that sets a header:
 
     server = MCPServer(name="shop", version="1.0.0", auth=proxy_auth)
 
-Full OAuth 2.1, which the `MCP authorization specification <https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization>`__ describes and which hosted assistants such as Claude.ai and ChatGPT require for their connectors, would plug in here too: validate the access token, set ``request.user``, done.
-django-mcpz does not yet provide it.
+Tokens from an external OAuth authorization server plug in the same way: validate the access token, set ``request.user``, done.
 
 .. _server-permissions:
 
@@ -281,10 +313,10 @@ Callers that fail the check do not see the tool in ``tools/list``, so the callin
 Nothing about restricted tools is revealed to callers lacking permission.
 
 Both forms need the ``auth`` callable, or middleware, to identify the caller first.
-String permissions require |request.user|__ to be set, which :func:`~django_mcpz.tokens.auth.token_auth` does from the token’s user.
+String permissions require |request.user|__ to be set, which :func:`~django_mcpz.bearer_tokens.auth.token_auth` does from the token’s user.
 If nothing set it, the check raises ``ImproperlyConfigured`` rather than failing quietly.
 Callable permissions that read ``request.user`` need the same, and should guard for its absence themselves.
-Callable permissions can check whatever the ``auth`` callable attached, such as ``request.mcp_token`` from the tokens app.
+Callable permissions can check whatever the ``auth`` callable attached, such as ``request.mcp_token`` from the bearer tokens app.
 
 .. |request.user| replace:: ``request.user``
 __ https://docs.djangoproject.com/en/stable/ref/request-response/#django.http.HttpRequest.user
@@ -340,14 +372,17 @@ Each record’s attributes are listed in :ref:`api-logging`.
 
 .. _server-legacy:
 
-Clients on earlier protocol revisions
--------------------------------------
+Clients on earlier MCP versions
+-------------------------------
 
-Adoption of 2026-07-28 is uneven: some clients probe with ``server/discover`` and speak it, while others still open with the ``initialize`` handshake of the 2025 revisions.
+Adoption of MCP version 2026-07-28 is uneven: some clients probe with ``server/discover`` and speak it, while others still open with the |initialize|__ handshake of the 2025 versions.
 By default, servers serve both.
 
-The 2025 revisions allow a stateless server mode, with no session ID and no server-to-client stream, that maps onto the same synchronous view.
-A request without an ``MCP-Protocol-Version`` header, or with one naming a 2025 revision, is handled that way, as detailed in :ref:`protocol-legacy`.
+.. |initialize| replace:: ``initialize``
+__ https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle#initialization
+
+The 2025 versions allow a stateless server mode, with no session ID and no server-to-client stream, that maps onto the same synchronous view.
+A request without an ``MCP-Protocol-Version`` header, or with one naming a 2025 version, is handled that way, as detailed in :ref:`protocol-legacy`.
 
 Authentication and permissions apply identically.
-Pass ``minimum_protocol_version="2026-07-28"`` to serve only that revision, rejecting requests without its version header, if you want to be certain every caller is on the current revision.
+Pass ``minimum_protocol_version="2026-07-28"`` to serve only that version, rejecting requests without its ``MCP-Protocol-Version`` header, if you want to be certain every caller is on the current version.

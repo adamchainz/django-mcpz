@@ -12,7 +12,10 @@ Servers
     Like Django’s ``admin.site``, you create one, register things on it, and route it.
 
     :param name:
-        The server name, reported to clients in the ``io.modelcontextprotocol/serverInfo`` metadata of every result, and in ``initialize`` responses to clients on the 2025 revisions.
+        The server name, reported to clients in the ``io.modelcontextprotocol/serverInfo`` metadata of every result, and in |initialize|__ responses to clients on the 2025 versions.
+
+        .. |initialize| replace:: ``initialize``
+        __ https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle#initialization
 
     :param version:
         The server version, reported alongside ``name``.
@@ -21,11 +24,14 @@ Servers
         Optional human-readable server name for display purposes.
 
     :param instructions:
-        Optional natural-language guidance for LLMs on how to use this server effectively, returned from ``server/discover``.
+        Optional natural-language guidance for LLMs on how to use this server effectively, returned from |server/discover|__.
+
+        .. |server/discover| replace:: ``server/discover``
+        __ https://modelcontextprotocol.io/specification/draft/server/discover
 
     :param auth:
         Required.
-        A callable implementing authentication, run on each request before the request body is touched, such as :func:`public` or :func:`django_mcpz.tokens.auth.token_auth`.
+        A callable implementing authentication, run on each request before the request body is touched, such as :func:`public` or :func:`django_mcpz.bearer_tokens.auth.token_auth`.
         It receives the |HttpRequest|__ and should return ``None`` to allow the request, or an |HttpResponse|__ (such as ``HttpResponse(status=HTTPStatus.UNAUTHORIZED)``) to reject it.
 
         .. |HttpRequest| replace:: ``HttpRequest``
@@ -37,9 +43,9 @@ Servers
         See :ref:`server-authentication`.
 
     :param minimum_protocol_version:
-        The oldest MCP protocol revision to serve, as one of two strings.
-        ``"2025-03-26"``, the default, also serves clients on the 2025 revisions, which open with an ``initialize`` handshake, since many clients have yet to adopt 2026-07-28.
-        ``"2026-07-28"`` serves only that revision.
+        The oldest MCP version to serve, as one of two strings.
+        ``"2025-03-26"``, the default, also serves clients on the 2025 versions, which open with an ``initialize`` handshake, since many clients have yet to adopt MCP version 2026-07-28.
+        ``"2026-07-28"`` serves only that version.
         Any other value raises |ImproperlyConfigured|__.
         See :ref:`server-legacy`.
 
@@ -124,7 +130,11 @@ Servers
 
         :param permission:
             Optional authorization check restricting the tool to some callers: a callable receiving the ``HttpRequest`` and returning a boolean, or a Django `permission <https://docs.djangoproject.com/en/stable/topics/auth/default/#permissions-and-authorization>`__ codename string like ``"shop.view_order"``, checked with |request.user.has_perm()|__.
-            Callers that fail the check do not see the tool in ``tools/list`` and cannot call it.
+            Callers that fail the check do not see the tool in |tools/list|__ and cannot call it.
+
+            .. |tools/list| replace:: ``tools/list``
+            __ https://modelcontextprotocol.io/specification/draft/server/tools#listing-tools
+
             See :ref:`server-permissions`.
 
             __ https://docs.djangoproject.com/en/stable/ref/contrib/auth/#django.contrib.auth.models.User.has_perm
@@ -136,7 +146,10 @@ Servers
 
         __ https://docs.djangoproject.com/en/stable/ref/request-response/#django.http.HttpRequest.user
 
-        The return value determines the ``tools/call`` result:
+        The return value determines the |tools/call|__ result:
+
+        .. |tools/call| replace:: ``tools/call``
+        __ https://modelcontextprotocol.io/specification/draft/server/tools#calling-tools
 
         * a ``str`` becomes a single text content block.
         * ``None`` becomes an empty content list.
@@ -259,19 +272,19 @@ Records logged to the ``django_mcpz.calls`` logger, as covered in :ref:`server-l
    * - ``duration``
      - Seconds spent validating arguments and running the tool, as a float.
 
-.. _api-tokens:
+.. _api-bearer-tokens:
 
-Tokens
-------
+Bearer tokens
+-------------
 
-.. currentmodule:: django_mcpz.tokens
+.. currentmodule:: django_mcpz.bearer_tokens
 
-The ``django_mcpz.tokens`` app, as covered in :doc:`tokens`.
+The ``django_mcpz.bearer_tokens`` app, as covered in :doc:`bearer_tokens`.
 
 .. function:: auth.token_auth(request)
 
-    Reject requests, with a 401 response, unless their ``Authorization`` header carries an unrevoked, unexpired token as a bearer credential, like ``Authorization: Bearer mcp_...``.
-    Tokens of inactive users, per |is_active|__, are rejected too, so deactivating a user cuts off their clients.
+    Reject requests, with a 401 response, unless their ``Authorization`` header carries an unrevoked, unexpired bearer token, like ``Authorization: Bearer mcp_...``.
+    Bearer tokens of inactive users, per |is_active|__, are rejected too, so deactivating a user cuts off their clients.
 
     __ https://docs.djangoproject.com/en/stable/ref/contrib/auth/#django.contrib.auth.models.User.is_active
 
@@ -321,9 +334,10 @@ The ``django_mcpz.tokens`` app, as covered in :doc:`tokens`.
 
         Mark the token revoked.
 
-.. describe:: python manage.py create_mcp_token NAME --user USERNAME [--expires-in-days DAYS]
+.. describe:: python manage.py mcpz bearer-tokens create NAME --user USERNAME [--expires-in-days DAYS]
 
-    Management command that creates a token and prints its value once.
+    Management command that creates a bearer token and prints its value once.
+    The ``bearer-tokens`` sub-command is only available when ``django_mcpz.bearer_tokens`` is in ``INSTALLED_APPS``.
 
     ``NAME``
         A name for the token, such as the client using it.
@@ -337,6 +351,117 @@ The ``django_mcpz.tokens`` app, as covered in :doc:`tokens`.
 
     .. |get_by_natural_key()| replace:: ``get_by_natural_key()``
     __ https://docs.djangoproject.com/en/stable/topics/auth/customizing/#django.contrib.auth.models.BaseUserManager.get_by_natural_key
+
+.. describe:: python manage.py mcpz bearer-tokens clear
+
+    Management command that deletes expired and revoked bearer tokens, printing how many.
+
+.. function:: tasks.clear_expired()
+
+    A task for Django’s tasks framework, on Django 6.0 and later, that deletes expired and revoked bearer tokens and returns how many.
+    See :ref:`cleanup`.
+
+.. _api-oauth:
+
+OAuth
+-----
+
+.. currentmodule:: django_mcpz.oauth
+
+The ``django_mcpz.oauth`` app, as covered in :doc:`oauth`.
+
+.. function:: auth.oauth_auth(request)
+
+    Reject requests, with a 401 response, unless their ``Authorization`` header carries a valid access token as a bearer credential.
+    Valid means unexpired, unrevoked, issued for this MCP server’s URL, and belonging to an active user.
+    The 401 response’s ``WWW-Authenticate`` header names the server’s metadata document, which is how clients find the authorization server.
+
+    On success, set |request.user|__ to the token’s user, and attach the :class:`~models.AccessToken` as ``request.mcp_token``.
+
+    __ https://docs.djangoproject.com/en/stable/ref/request-response/#django.http.HttpRequest.user
+
+    Tokens are bound to the MCP server’s URL, scheme and host included, so a token issued while the site was reached on one host is rejected on another.
+
+.. class:: models.Client
+
+    An OAuth client: an application that may request tokens.
+
+    .. attribute:: client_id
+
+        The identifier clients present.
+        A random string for dynamically registered clients, or the document URL for client ID metadata document clients.
+
+    .. attribute:: kind
+
+        ``"registered"`` or ``"metadata"``, for the two ways a client can arrive.
+
+    .. attribute:: name
+    .. attribute:: redirect_uris
+
+        The client’s name, shown on the consent page, and the list of URLs it may be redirected to, compared exactly.
+
+    .. attribute:: created_at
+    .. attribute:: fetched_at
+    .. attribute:: last_used_at
+
+        Timestamps.
+        ``fetched_at`` is when a metadata document was last fetched.
+        ``last_used_at`` is when a token was last issued to the client.
+
+.. class:: models.AuthorizationCode
+
+    A single-use code issued by the authorize page, exchanged for tokens at the token endpoint.
+    Every token issued from it, including through refreshes, links back to it, so that reuse of the code or of a refresh token revokes the whole family.
+
+.. class:: models.AccessToken
+
+    A bearer token for an MCP server.
+
+    .. attribute:: client
+    .. attribute:: user
+    .. attribute:: resource
+    .. attribute:: scope
+
+        Who the token was issued to, who it acts as, the MCP server URL it is valid for, and the requested scope, if any.
+
+    .. attribute:: created_at
+    .. attribute:: expires_at
+    .. attribute:: revoked_at
+
+        Timestamps.
+        ``revoked_at`` is ``None`` while the token has not been revoked.
+
+    .. property:: is_valid
+
+        Whether the token is unexpired and unrevoked.
+
+    .. method:: revoke()
+
+        Mark the token revoked.
+
+.. class:: models.RefreshToken
+
+    A token for obtaining a fresh access token without the user.
+    Has the same fields and methods as :class:`~models.AccessToken`, plus:
+
+    .. attribute:: access_token
+
+        The access token issued alongside it.
+
+    .. attribute:: used_at
+
+        When it was exchanged, since each refresh token may be used once.
+
+.. describe:: python manage.py mcpz oauth clear
+
+    Management command that deletes expired authorization codes, expired and revoked tokens, and dynamically registered clients that never obtained a token within a day of registering.
+    The ``oauth`` sub-command is only available when ``django_mcpz.oauth`` is in ``INSTALLED_APPS``.
+    An expired access token stays while its refresh token is live, and a code stays while any token issued from it exists, so that reuse of a refresh token can still revoke the family.
+
+.. function:: tasks.clear_expired()
+
+    A task for Django’s tasks framework, on Django 6.0 and later, that does the same as the command and returns the number of rows deleted by kind: ``refresh_tokens``, ``access_tokens``, ``codes``, and ``clients``.
+    See :ref:`cleanup`.
 
 .. |request.user.has_perm()| replace:: ``request.user.has_perm()``
 .. |request.user| replace:: ``request.user``

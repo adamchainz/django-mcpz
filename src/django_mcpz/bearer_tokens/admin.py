@@ -7,7 +7,8 @@ from django.db.models import QuerySet
 from django.http import HttpRequest
 from django.utils import timezone
 
-from django_mcpz.tokens.models import Token
+from django_mcpz import tokens
+from django_mcpz.bearer_tokens.models import Token
 
 if TYPE_CHECKING:
     ModelAdmin = admin.ModelAdmin[Token]
@@ -25,7 +26,7 @@ class TokenAdmin(ModelAdmin):
         "expires_at",
         "revoked_at",
     ]
-    list_filter = ["revoked_at"]
+    list_filter = [("revoked_at", admin.EmptyFieldListFilter)]
     search_fields = ["name"]
     raw_id_fields = ["user"]
     fields = [
@@ -44,7 +45,7 @@ class TokenAdmin(ModelAdmin):
         self, request: HttpRequest, obj: Token, form: Any, change: bool
     ) -> None:
         if not change:
-            value = Token.generate()
+            value = tokens.generate()
             obj.digest = Token.digest_of(value)
             messages.success(
                 request,

@@ -166,6 +166,14 @@ def _tool_result(output: Any) -> dict[str, Any]:
     return result
 
 
+def host_allowed(host: str) -> bool:
+    """Whether the host is in ALLOWED_HOSTS, with Django's DEBUG allowance."""
+    allowed_hosts = settings.ALLOWED_HOSTS
+    if settings.DEBUG and not allowed_hosts:
+        allowed_hosts = [".localhost", "127.0.0.1", "[::1]"]
+    return validate_host(host, allowed_hosts)
+
+
 def public(request: HttpRequest) -> HttpResponse | None:
     """
     Allow every request, for a server without authentication.
@@ -199,7 +207,7 @@ class MCPServer:
         if not callable(auth):
             raise ImproperlyConfigured(
                 "auth must be a callable, such as django_mcpz.server.public or"
-                f" django_mcpz.tokens.auth.token_auth, not {auth!r}."
+                f" django_mcpz.bearer_tokens.auth.token_auth, not {auth!r}."
             )
         self.server_info: dict[str, str] = {"name": name, "version": version}
         if title is not None:
@@ -405,10 +413,7 @@ class MCPServer:
             return False
         if host is None:
             return False
-        allowed_hosts = settings.ALLOWED_HOSTS
-        if settings.DEBUG and not allowed_hosts:
-            allowed_hosts = [".localhost", "127.0.0.1", "[::1]"]
-        return validate_host(host, allowed_hosts)
+        return host_allowed(host)
 
     def _validate_metadata(
         self,

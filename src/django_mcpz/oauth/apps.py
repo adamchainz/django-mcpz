@@ -3,8 +3,8 @@ from __future__ import annotations
 from django.apps import AppConfig
 
 
-class TokensConfig(AppConfig):
-    name = "django_mcpz.tokens"
-    label = "django_mcpz_tokens"
-    verbose_name = "MCP tokens"
+class OAuthConfig(AppConfig):
+    name = "django_mcpz.oauth"
+    label = "django_mcpz_oauth"
+    verbose_name = "MCP OAuth"
     default_auto_field = "django.db.models.BigAutoField"

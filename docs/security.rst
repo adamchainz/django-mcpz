@@ -25,10 +25,16 @@ Some things to keep in mind:
   Data your application stores, such as free text from other users, can contain instructions that try to steer the model.
   Keep tools narrow, return only the fields the model needs, and prefer structured output over pasting whole documents.
 
-* Each ``tools/call`` runs in the request like a normal view, so |ATOMIC_REQUESTS|__ applies to it, and a tool that raises rolls back if that setting is on.
+* Each |tools/call|__ runs in the request like a normal view, so |ATOMIC_REQUESTS|__ applies to it, and a tool that raises rolls back if that setting is on.
   Without it, a tool that makes several writes should wrap them in |transaction.atomic()|__ itself.
 
+  .. |tools/call| replace:: ``tools/call``
+  __ https://modelcontextprotocol.io/specification/draft/server/tools#calling-tools
+
 * Requests carrying an ``Origin`` header from a host outside |ALLOWED_HOSTS|__ are rejected, so a web page cannot make a browser call your server with its cookies, as covered in :ref:`server-protocol-support`.
+
+* OAuth clients identify themselves, through registration or a metadata document, so any application can present itself under any name.
+  The consent page is where the user checks that the name and the redirect destination match the application they are connecting, which is why the :doc:`oauth <oauth>` app shows it on every authorization.
 
 .. |SECURE_SSL_REDIRECT| replace:: ``SECURE_SSL_REDIRECT``
 __ https://docs.djangoproject.com/en/stable/ref/settings/#secure-ssl-redirect

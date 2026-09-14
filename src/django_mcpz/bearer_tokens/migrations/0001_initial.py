@@ -49,13 +49,14 @@ class Migration(migrations.Migration):
                     "user",
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.CASCADE,
-                        related_name="mcp_tokens",
+                        related_name="mcp_bearer_tokens",
                         to=settings.AUTH_USER_MODEL,
                     ),
                 ),
             ],
             options={
                 "ordering": ["-created_at"],
+                "verbose_name": "bearer token",
             },
         ),
     ]

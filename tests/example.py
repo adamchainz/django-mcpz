@@ -7,8 +7,9 @@ import msgspec
 from django.contrib.auth.models import AnonymousUser, User
 from django.http import HttpRequest, HttpResponse
 
+from django_mcpz.bearer_tokens.auth import token_auth
+from django_mcpz.oauth.auth import oauth_auth
 from django_mcpz.server import Icon, MCPServer, ToolError, public
-from django_mcpz.tokens.auth import token_auth
 
 server = MCPServer(
     name="example-server",
@@ -276,11 +277,13 @@ def widget_tool(request: HttpRequest, arguments: dict[str, Any]) -> str:
     return "widgets"
 
 
-# Authenticated with the django_mcpz.tokens app.
-tokens_server = MCPServer(name="tokens-server", version="1.0.0", auth=token_auth)
+# Authenticated with bearer tokens from the django_mcpz.bearer_tokens app.
+bearer_tokens_server = MCPServer(
+    name="bearer-tokens-server", version="1.0.0", auth=token_auth
+)
 
 
-@tokens_server.tool(description="Who is calling.", read_only=True)
+@bearer_tokens_server.tool(description="Who is calling.", read_only=True)
 def whoami(request: HttpRequest) -> dict[str, Any]:
     return {
         "token": request.mcp_token.name,  # type: ignore[attr-defined]
@@ -288,9 +291,24 @@ def whoami(request: HttpRequest) -> dict[str, Any]:
     }
 
 
-@tokens_server.tool(
+@bearer_tokens_server.tool(
     description="Available to users with the tests.view_widget permission.",
     permission="tests.view_widget",
 )
 def token_widget_tool(request: HttpRequest) -> str:
     return "widgets"
+
+
+# -- OAuth
+
+oauth_server = MCPServer(
+    name="oauth-server", version="1.0.0", title="OAuth server", auth=oauth_auth
+)
+
+
+@oauth_server.tool(description="Who is calling.", read_only=True)
+def oauth_whoami(request: HttpRequest) -> dict[str, Any]:
+    return {
+        "client": request.mcp_token.client.name,  # type: ignore[attr-defined]
+        "user": request.user.get_username(),
+    }

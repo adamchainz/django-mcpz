@@ -50,7 +50,9 @@ def resolve(path: str) -> Any:
     for i in range(len(parts) - 1, 0, -1):
         try:
             obj = importlib.import_module(".".join(parts[:i]))
-        except ImportError:
+        except ModuleNotFoundError as exc:
+            if exc.name == "django.tasks":
+                pytest.skip("Django tasks framework, 6.0+")
             continue
         for attr in parts[i:]:
             obj = getattr(obj, attr)
@@ -98,6 +100,8 @@ DOCUMENTED = documented_objects()
 )
 def test_documented_object(kind: str, path: str, name: str, params: str | None) -> None:
     obj = resolve(path)
+    # A task from Django's tasks framework wraps the documented function.
+    obj = getattr(obj, "func", obj)
 
     if params is None:
         # Documented without a signature, for example a model or attribute:

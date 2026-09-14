@@ -9,7 +9,8 @@ django-mcpz documentation
 
    installation
    servers
-   tokens
+   oauth
+   bearer_tokens
    api
    protocol
    security
