@@ -84,7 +84,11 @@ Setup
        from django_mcpz.oauth.auth import oauth_auth
        from django_mcpz.server import MCPServer
 
-       server = MCPServer(name="shop", version="1.0.0", auth=oauth_auth)
+       server = MCPServer(
+           name="shop",
+           version="1.0.0",
+           auth=oauth_auth
+       )
 
 5. Make sure users can log in.
    The authorize page sends anonymous users to |LOGIN_URL|__, so any login flow works, including social login.
@@ -102,7 +106,7 @@ Then add your server’s URL to the assistant as a connector, and it will take y
 The consent page
 ----------------
 
-Every authorization shows a page naming the client, the MCP server, and the user, with Allow and Deny buttons.
+Every authorization shows a page naming the client, the MCP server, and the user, with “Allow” and “Deny” buttons.
 It is shown every time, even for a client the user approved before, since anyone can register a client with any name, and the page is what lets the user notice an impostor.
 Requests that cannot be honoured, such as one from an unknown client, show an error page instead.
 
@@ -119,7 +123,7 @@ The two pages are rendered from three templates:
 ``django_mcpz/oauth/error.html``
     The error page, with ``error`` and ``description`` in its context.
 
-Override them as you would any app’s templates, as covered in |Overriding templates|__: put files of the same names in a directory listed in your ``TEMPLATES`` setting’s ``DIRS``, or in an app listed before ``django_mcpz.oauth`` in ``INSTALLED_APPS``.
+Override them as you would any app’s templates, as covered in |Django’s Overriding templates documentation|__: put files of the same names in a directory listed in your ``TEMPLATES`` setting’s ``DIRS``, or in an app listed before ``django_mcpz.oauth`` in ``INSTALLED_APPS``.
 To restyle both pages at once, override only the base template, for example with one that extends your site’s own base template and fills in its blocks.
 The pages are served with a ``Content-Security-Policy`` header of ``frame-ancestors 'none'``, so they cannot be shown inside a frame on another page.
 On Django 6.0 and later with |ContentSecurityPolicyMiddleware|__ installed, the header is instead built from your ``SECURE_CSP`` policy with its ``frame-ancestors`` directive replaced, so the rest of your policy applies to the pages too.
@@ -127,7 +131,7 @@ On Django 6.0 and later with |ContentSecurityPolicyMiddleware|__ installed, the 
 .. |ContentSecurityPolicyMiddleware| replace:: ``ContentSecurityPolicyMiddleware``
 __ https://docs.djangoproject.com/en/stable/ref/middleware/#module-django.middleware.csp
 
-.. |Overriding templates| replace:: Overriding templates
+.. |Django’s Overriding templates documentation| replace:: Django’s “Overriding templates” documentation
 __ https://docs.djangoproject.com/en/stable/howto/overriding-templates/
 
 Serving developer tools too
@@ -149,7 +153,11 @@ To serve both kinds of client from one server, write an ``auth`` callable that a
         return oauth_auth(request)
 
 
-    server = MCPServer(name="shop", version="1.0.0", auth=either_auth)
+    server = MCPServer(
+        name="shop",
+        version="1.0.0",
+        auth=either_auth
+    )
 
 Managing clients and tokens
 ---------------------------
@@ -160,7 +168,7 @@ Deactivating the user cuts it off at the next request, and so does revoking thei
 Assistants also revoke their own tokens when the user disconnects, through the revocation endpoint.
 
 Expired and revoked codes and tokens, and clients that registered but never obtained a token, stay in the database until cleared.
-Clear them periodically with the ``mcpz oauth clear`` management command, or with the :func:`~tasks.clear_expired` task, as covered in :ref:`cleanup`.
+Clear them periodically, as covered in :ref:`cleanup`.
 
 .. _oauth-settings:
 
