@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from django.core.management.commands.runserver import Command as RunserverCommand
+# The staticfiles version, which also serves the server's icon in DEBUG mode.
+from django.contrib.staticfiles.management.commands.runserver import (
+    Command as RunserverCommand,
+)
 
 
 class Command(RunserverCommand):

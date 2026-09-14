@@ -1,18 +1,37 @@
 from __future__ import annotations
 
 import datetime as dt
+import io
 from typing import Annotated, Any
 
 import msgspec
+from django.db.models import Sum
 from django.http import HttpRequest
+from django.urls import reverse
+from django.utils import timezone
+from PIL import Image as PILImage
+from PIL import ImageDraw, ImageFont
 
-from django_mcpz.server import MCPServer, ToolError, public
+from django_mcpz.server import (
+    Icon,
+    Image,
+    MCPServer,
+    ResourceLink,
+    Text,
+    ToolError,
+    public,
+)
 from pizzeria.models import Order, Pizza
 
 server = MCPServer(
     name="mcpizza",
     version="1.0.0",
     title="MCPizza",
+    description="A pizza place: browse the menu, read the kitchen’s notes, and order.",
+    website_url="https://github.com/adamchainz/django-mcpz/tree/main/example",
+    # Shown by clients alongside the title, and on the OAuth consent page.
+    # A static file, served by runserver in DEBUG mode.
+    icons=[Icon(static="pizzeria/icon.svg", sizes=("any",))],
     instructions=(
         "MCPizza sells pizzas. Call current_date to learn today's date, then"
         " search_menu with on_date to see what is on the menu for a given"
@@ -134,3 +153,110 @@ def place_order(request: HttpRequest, params: PlaceOrderParams) -> dict[str, Any
         "requests": order.requests,
         "total": float(order.total),
     }
+
+
+# A categorical palette in a fixed order, checked for colour-blind readers:
+# adjacent hues stay distinct under the common forms of colour blindness.
+PIE_COLOURS = [
+    "#2a78d6",  # blue
+    "#eb6834",  # orange
+    "#1baf7a",  # aqua
+    "#eda100",  # yellow
+    "#e87ba4",  # magenta
+    "#008300",  # green
+    "#4a3aa7",  # violet
+    "#e34948",  # red
+]
+SURFACE = "#fcfcfb"
+INK = "#52514e"
+
+
+def pie_chart_png(slices: list[tuple[str, int]]) -> bytes:
+    """
+    A pie chart with a legend, as PNG, drawn with Pillow.
+
+    A raster image, rather than SVG, since that is what the assistants show
+    their models. Drawn at double size and scaled down, for smooth edges.
+    """
+    total = sum(count for _, count in slices)
+    scale = 2
+    width, height = 460, max(200, 20 + 20 * len(slices))
+    image = PILImage.new("RGB", (width * scale, height * scale), SURFACE)
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default(size=12 * scale)
+    pie = (20 * scale, 20 * scale, 180 * scale, 180 * scale)
+    start = -90.0
+    for i, (label, count) in enumerate(slices):
+        colour = PIE_COLOURS[i % len(PIE_COLOURS)]
+        end = 270.0 if i == len(slices) - 1 else start + 360 * count / total
+        # A thin gap in the surface colour separates the slices.
+        draw.pieslice(pie, start, end, fill=colour, outline=SURFACE, width=2 * scale)
+        start = end
+        y = (20 + 20 * i) * scale
+        draw.rectangle(
+            (200 * scale, y - 6 * scale, 212 * scale, y + 6 * scale), fill=colour
+        )
+        draw.text(
+            (218 * scale, y),
+            f"{label}: {count} ({count / total:.0%})",
+            fill=INK,
+            font=font,
+            anchor="lm",
+        )
+    image = image.resize((width, height), PILImage.Resampling.LANCZOS)
+    buffer = io.BytesIO()
+    image.save(buffer, "PNG")
+    return buffer.getvalue()
+
+
+@server.tool(
+    description=(
+        "A pie chart of the pizzas ordered today, as an image, with the"
+        " numbers behind it as text."
+    ),
+    read_only=True,
+)
+def orders_chart(request: HttpRequest) -> list[Text | Image]:
+    today = timezone.localdate()
+    rows = (
+        Order.objects.filter(placed_at__date=today)
+        .values("pizza__name")
+        .annotate(quantity=Sum("quantity"))
+        .order_by("-quantity", "pizza__name")
+    )
+    slices = [(row["pizza__name"], row["quantity"]) for row in rows]
+    if not slices:
+        return [Text(f"No orders yet on {today.isoformat()}.")]
+    total = sum(count for _, count in slices)
+    summary = ", ".join(
+        f"{name} {count} ({count / total:.0%})" for name, count in slices
+    )
+    return [
+        Text(f"Pizzas ordered on {today.isoformat()}, {total} in total: {summary}."),
+        Image(pie_chart_png(slices), "image/png"),
+    ]
+
+
+class MenuLinkParams(msgspec.Struct):
+    on_date: Annotated[
+        dt.date | None,
+        msgspec.Meta(
+            description="The date to link the menu for, as YYYY-MM-DD. Defaults to today."
+        ),
+    ] = None
+
+
+@server.tool(
+    description=(
+        "A link to the web page showing the menu for a date, past or future,"
+        " for the user to open in a browser."
+    ),
+    read_only=True,
+)
+def menu_link(request: HttpRequest, params: MenuLinkParams) -> ResourceLink:
+    on_date = params.on_date or dt.date.today()
+    return ResourceLink(
+        uri=request.build_absolute_uri(reverse("menu", args=[on_date])),
+        name=f"MCPizza menu for {on_date.isoformat()}",
+        mime_type="text/html",
+    )
