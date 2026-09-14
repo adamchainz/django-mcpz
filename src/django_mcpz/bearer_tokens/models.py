@@ -1,17 +1,13 @@
 from __future__ import annotations
 
 import datetime as dt
-import hashlib
-import secrets
 
 from django.conf import settings
 from django.contrib.auth.base_user import AbstractBaseUser
 from django.db import models
 from django.utils import timezone
 
-# A generic prefix, so leaked tokens are recognisable by secret scanners
-# without naming the server software.
-TOKEN_PREFIX = "mcp_"
+from django_mcpz import tokens
 
 
 class Token(models.Model):
@@ -26,7 +22,7 @@ class Token(models.Model):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name="mcp_tokens",
+        related_name="mcp_bearer_tokens",
     )
     digest = models.CharField(max_length=64, unique=True, editable=False)
     created_at = models.DateTimeField(default=timezone.now, editable=False)
@@ -40,18 +36,10 @@ class Token(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        verbose_name = "bearer token"
 
     def __str__(self) -> str:
         return self.name
-
-    @staticmethod
-    def generate() -> str:
-        """Generate a new token value, to be digested before storage."""
-        return TOKEN_PREFIX + secrets.token_urlsafe(32)
-
-    @staticmethod
-    def digest_of(token: str) -> str:
-        return hashlib.sha256(token.encode()).hexdigest()
 
     @classmethod
     def create(
@@ -66,9 +54,9 @@ class Token(models.Model):
 
         The value cannot be recovered later, so pass it on straight away.
         """
-        value = cls.generate()
+        value = tokens.generate()
         token = cls.objects.create(
-            name=name, user=user, expires_at=expires_at, digest=cls.digest_of(value)
+            name=name, user=user, expires_at=expires_at, digest=tokens.sha256_hex(value)
         )
         return token, value
 

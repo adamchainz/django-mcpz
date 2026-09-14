@@ -2,12 +2,21 @@ from __future__ import annotations
 
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Annotated, Any, TypedDict
+from unittest import mock
 
 import msgspec
 import msgspec.json
 import pytest
 from django.core.exceptions import ImproperlyConfigured
-from django.test import Client, RequestFactory, SimpleTestCase, override_settings
+from django.db import connection
+from django.test import (
+    Client,
+    RequestFactory,
+    SimpleTestCase,
+    TestCase,
+    TransactionTestCase,
+    override_settings,
+)
 
 from django_mcpz.headers import encode_header_value
 from django_mcpz.jsonrpc import (
@@ -24,7 +33,8 @@ from django_mcpz.server import (
     MCPServer,
     public,
 )
-from tests import example
+from tests import mcp
+from tests.models import Widget
 
 if TYPE_CHECKING:
     # For the unresolvable-annotation test: known to mypy, absent at runtime.
@@ -285,7 +295,7 @@ class MetadataValidationTests(ServerTestCase):
             response, UNSUPPORTED_PROTOCOL_VERSION, status=HTTPStatus.BAD_REQUEST
         )
         assert error["data"] == {
-            "supported": example.server.supported_versions,
+            "supported": mcp.server.supported_versions,
             "requested": "2027-01-01",
         }
 
@@ -403,6 +413,7 @@ class ToolsListTests(ServerTestCase):
             "greet",
             "unavailable",
             "crash",
+            "create_widget",
             "noop",
             "unencodable",
             "regional",
@@ -423,7 +434,7 @@ class ToolsListTests(ServerTestCase):
         assert greet["annotations"] == {"readOnlyHint": True}
         assert "outputSchema" not in greet
 
-        regional = result["tools"][6]
+        regional = result["tools"][7]
         assert regional["icons"] == [
             {"src": "https://example.com/regional.png", "mimeType": "image/png"}
         ]
@@ -845,7 +856,7 @@ class CallLoggingTests(ServerTestCase):
 
         assert record.getMessage().startswith("Tool 'add': ok in ")
         assert record.getMessage().endswith("ms")
-        assert record.server is example.server
+        assert record.server is mcp.server
         assert record.request.path == "/mcp"
         assert record.tool == "add"
         assert record.arguments == {"a": 1, "b": 2}
@@ -1054,3 +1065,75 @@ class RegistrationTests(SimpleTestCase):
             @server.tool(description="Bad.")
             def bad(request: Any, message: Missing) -> None:  # pragma: no cover
                 return None
+
+
+class ToolTransactionTests(ServerTestCase, TestCase):
+    """
+    Inside a transaction, as under ATOMIC_REQUESTS, a tool that raises leaves
+    no writes behind, and the transaction stays usable.
+    """
+
+    def call(self, then: str) -> Any:
+        message = make_message(
+            "tools/call", {"name": "create_widget", "arguments": {"then": then}}
+        )
+        return self.post(message)
+
+    def test_success_kept(self):
+        response = self.call("ok")
+
+        result = self.assert_result(response)
+        assert result["isError"] is False
+        assert Widget.objects.count() == 1
+
+    def test_tool_error_rolled_back(self):
+        response = self.call("error")
+
+        result = self.assert_result(response)
+        assert result["isError"] is True
+        assert Widget.objects.count() == 0
+
+    def test_exception_rolled_back(self):
+        with self.assertLogs("django_mcpz", level="ERROR"):
+            response = self.call("crash")
+
+        result = self.assert_result(response)
+        assert result["isError"] is True
+        assert Widget.objects.count() == 0
+
+
+class ToolAutocommitTests(ServerTestCase, TransactionTestCase):
+    """Outside any transaction, the view behaves as any Django view does."""
+
+    def call(self, then: str) -> Any:
+        message = make_message(
+            "tools/call", {"name": "create_widget", "arguments": {"then": then}}
+        )
+        return self.post(message)
+
+    def test_writes_kept_without_atomic_requests(self):
+        with self.assertLogs("django_mcpz", level="ERROR"):
+            response = self.call("crash")
+
+        result = self.assert_result(response)
+        assert result["isError"] is True
+        assert Widget.objects.count() == 1
+
+    def test_writes_rolled_back_with_atomic_requests(self):
+        with (
+            mock.patch.dict(connection.settings_dict, {"ATOMIC_REQUESTS": True}),
+            self.assertLogs("django_mcpz", level="ERROR"),
+        ):
+            response = self.call("crash")
+
+        result = self.assert_result(response)
+        assert result["isError"] is True
+        assert Widget.objects.count() == 0
+
+    def test_success_kept_with_atomic_requests(self):
+        with mock.patch.dict(connection.settings_dict, {"ATOMIC_REQUESTS": True}):
+            response = self.call("ok")
+
+        result = self.assert_result(response)
+        assert result["isError"] is False
+        assert Widget.objects.count() == 1

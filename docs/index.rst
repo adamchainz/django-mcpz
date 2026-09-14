@@ -9,9 +9,10 @@ django-mcpz documentation
 
    installation
    servers
-   tokens
+   oauth
+   bearer_tokens
    api
    protocol
-   security
+   deployment
    example_project
    changelog

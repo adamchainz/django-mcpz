@@ -6,12 +6,13 @@ from django.db.models import Q
 from django.http import HttpRequest, HttpResponse
 from django.utils import timezone
 
-from django_mcpz.tokens.models import Token
+from django_mcpz import tokens
+from django_mcpz.bearer_tokens.models import Token
 
 
 def token_auth(request: HttpRequest) -> HttpResponse | None:
     """
-    Authenticate with a Token from the django_mcpz.tokens app.
+    Authenticate with a bearer token from the django_mcpz.bearer_tokens app.
 
     Requires the Authorization header to carry an unrevoked, unexpired token,
     for an active user, as a bearer credential. On success, attaches the Token as
@@ -26,7 +27,7 @@ def token_auth(request: HttpRequest) -> HttpResponse | None:
     try:
         token = Token.objects.select_related("user").get(
             Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()),
-            digest=Token.digest_of(credential),
+            digest=tokens.sha256_hex(credential),
             revoked_at__isnull=True,
         )
     except Token.DoesNotExist:

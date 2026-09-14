@@ -1,0 +1,7 @@
+{% extends "django_mcpz/oauth/base.html" %}
+{% block title %}Authorization request rejected{% endblock %}
+{% block content %}
+<h1>Authorization request rejected</h1>
+<p>The application that sent you here made a request this server cannot accept.</p>
+<p><code>{{ error }}</code>: {{ description }}</p>
+{% endblock %}

@@ -1,0 +1,11 @@
+body {
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+  max-inline-size: 32rem;
+  margin-block: 3rem;
+  margin-inline: auto;
+  padding-inline: 1rem;
+}
+strong, code { overflow-wrap: anywhere; }
+form { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+button { font: inherit; padding-block: 0.5rem; padding-inline: 1.25rem; }

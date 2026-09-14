@@ -39,7 +39,7 @@ A quick example:
     import msgspec
 
     from django_mcpz.server import MCPServer
-    from django_mcpz.tokens.auth import token_auth
+    from django_mcpz.bearer_tokens.auth import token_auth
     from example.models import Order
 
     server = MCPServer(

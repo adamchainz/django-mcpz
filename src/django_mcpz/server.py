@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 import mimetypes
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from http import HTTPStatus
 from typing import Any, Literal
@@ -13,6 +14,7 @@ import msgspec
 import msgspec.json
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
+from django.db import connections, transaction
 from django.http import HttpRequest, HttpResponse, HttpResponseNotAllowed
 from django.http.request import validate_host
 from django.templatetags.static import static as static_url
@@ -151,6 +153,21 @@ def _tool_definition(tool: Tool, request: HttpRequest) -> dict[str, Any]:
     }
 
 
+@contextlib.contextmanager
+def _savepoints() -> Iterator[None]:
+    """
+    Run a tool in a savepoint on each open transaction, as under
+    ATOMIC_REQUESTS, so that a tool that raises leaves no writes behind while
+    the request's transaction stays usable for the error result. Without an
+    open transaction, autocommit applies, as for any view.
+    """
+    with contextlib.ExitStack() as stack:
+        for connection in connections.all(initialized_only=True):
+            if connection.in_atomic_block:
+                stack.enter_context(transaction.atomic(using=connection.alias))
+        yield
+
+
 def _tool_result(output: Any) -> dict[str, Any]:
     result: dict[str, Any] = {"isError": False}
     if output is None:
@@ -164,6 +181,14 @@ def _tool_result(output: Any) -> dict[str, Any]:
         # response, avoiding encoding the output twice.
         result["structuredContent"] = msgspec.Raw(encoded)
     return result
+
+
+def host_allowed(host: str) -> bool:
+    """Whether the host is in ALLOWED_HOSTS, with Django's DEBUG allowance."""
+    allowed_hosts = settings.ALLOWED_HOSTS
+    if settings.DEBUG and not allowed_hosts:
+        allowed_hosts = [".localhost", "127.0.0.1", "[::1]"]
+    return validate_host(host, allowed_hosts)
 
 
 def public(request: HttpRequest) -> HttpResponse | None:
@@ -199,7 +224,7 @@ class MCPServer:
         if not callable(auth):
             raise ImproperlyConfigured(
                 "auth must be a callable, such as django_mcpz.server.public or"
-                f" django_mcpz.tokens.auth.token_auth, not {auth!r}."
+                f" django_mcpz.bearer_tokens.auth.token_auth, not {auth!r}."
             )
         self.server_info: dict[str, str] = {"name": name, "version": version}
         if title is not None:
@@ -213,7 +238,7 @@ class MCPServer:
             self.supported_versions.extend(LEGACY_PROTOCOL_VERSIONS)
         self._tools: dict[str, Tool] = {}
 
-    # -- Tool registration
+    # Tool registration
 
     def tool(
         self,
@@ -314,7 +339,7 @@ class MCPServer:
 
         return decorator
 
-    # -- The view
+    # The view
 
     # MCP clients are not browsers and authenticate per-request, so the
     # server is exempt from CSRF checks.
@@ -405,10 +430,7 @@ class MCPServer:
             return False
         if host is None:
             return False
-        allowed_hosts = settings.ALLOWED_HOSTS
-        if settings.DEBUG and not allowed_hosts:
-            allowed_hosts = [".localhost", "127.0.0.1", "[::1]"]
-        return validate_host(host, allowed_hosts)
+        return host_allowed(host)
 
     def _validate_metadata(
         self,
@@ -487,7 +509,7 @@ class MCPServer:
             )
         return None
 
-    # -- Method handlers
+    # Method handlers
 
     def _discover(self, request_id: str | int) -> HttpResponse:
         result: dict[str, Any] = {
@@ -601,11 +623,12 @@ class MCPServer:
                 )
 
         try:
-            if tool.takes_params:
-                output = tool.func(request, tool_arguments)
-            else:
-                output = tool.func(request)
-            result = _tool_result(output)
+            with _savepoints():
+                if tool.takes_params:
+                    output = tool.func(request, tool_arguments)
+                else:
+                    output = tool.func(request)
+                result = _tool_result(output)
         except ToolError as exc:
             return self._tool_error(request_id, str(exc)), "tool_error"
         except Exception:

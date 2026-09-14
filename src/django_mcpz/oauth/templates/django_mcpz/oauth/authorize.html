@@ -1,0 +1,25 @@
+{% extends "django_mcpz/oauth/base.html" %}
+{% block title %}Allow access?{% endblock %}
+{% block content %}
+<h1>Allow access?</h1>
+<p>
+  <strong>{{ client }}</strong> wants to use <strong>{{ resource }}</strong>
+  as <strong>{{ user }}</strong>.
+</p>
+{% if scope %}
+<p>Requested scope: <code>{{ scope }}</code></p>
+{% endif %}
+<p>
+  {% if redirect_is_local %}
+  After you decide, your browser will return to an application running on your computer.
+  {% else %}
+  After you decide, your browser will return to <strong>{{ redirect_host }}</strong>.
+  {% endif %}
+  Only continue if that is the application you are connecting.
+</p>
+<form method=post>
+  {% csrf_token %}
+  <button type=submit name=decision value=allow>Allow</button>
+  <button type=submit name=decision value=deny>Deny</button>
+</form>
+{% endblock %}

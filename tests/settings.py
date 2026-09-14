@@ -20,7 +20,8 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.sessions",
     "django_mcpz",
-    "django_mcpz.tokens",
+    "django_mcpz.oauth",
+    "django_mcpz.bearer_tokens",
     "tests",
 ]
 
