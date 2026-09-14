@@ -7,6 +7,8 @@ import json
 import re
 import secrets
 import time
+from collections.abc import Callable
+from functools import wraps
 from http import HTTPStatus
 from typing import Any
 from urllib.parse import urlencode, urlsplit
@@ -160,8 +162,26 @@ def resolve_resource(resource: str | None) -> str:
     return validated
 
 
+def frame_ancestors_none(
+    view: Callable[..., HttpResponse],
+) -> Callable[..., HttpResponse]:
+    """Forbid framing the view's responses, with the CSP header."""
+
+    @wraps(view)
+    def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        response = view(request, *args, **kwargs)
+        response["Content-Security-Policy"] = "frame-ancestors 'none'"
+        return response
+
+    return wrapper
+
+
+# OAuth 2.1 section 7.10: the consent page must not be framed, so a hidden
+# page cannot trick the user into clicking Allow. Both the older header and
+# the CSP directive, for every response.
 @csrf_exempt
 @xframe_options_deny
+@frame_ancestors_none
 @require_http_methods(["GET", "POST"])
 def authorize(request: HttpRequest) -> HttpResponse:
     """
@@ -241,11 +261,7 @@ def _authorize(request: HttpRequest) -> HttpResponse:
         "scope": scope,
     }
     if request.method == "GET":
-        response = render(request, "django_mcpz/oauth/authorize.html", context)
-        # OAuth 2.1 section 7.10: the consent page must not be framed, so a
-        # hidden page cannot trick the user into clicking Allow.
-        response["Content-Security-Policy"] = "frame-ancestors 'none'"
-        return response
+        return render(request, "django_mcpz/oauth/authorize.html", context)
 
     if request.POST.get("decision") != "allow":
         return redirect(

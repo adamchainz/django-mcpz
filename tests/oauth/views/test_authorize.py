@@ -79,6 +79,8 @@ class AuthorizeTests(TestCase):
         self.assertContains(
             response, "Unknown client_id.", status_code=HTTPStatus.BAD_REQUEST
         )
+        assert response["X-Frame-Options"] == "DENY"
+        assert response["Content-Security-Policy"] == "frame-ancestors 'none'"
 
     def test_unregistered_redirect_uri(self):
         response = self.get(redirect_uri="http://localhost:9999/other")
