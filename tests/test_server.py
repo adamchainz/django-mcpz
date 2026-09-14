@@ -24,7 +24,7 @@ from django_mcpz.server import (
     MCPServer,
     public,
 )
-from tests import example
+from tests import mcp
 
 if TYPE_CHECKING:
     # For the unresolvable-annotation test: known to mypy, absent at runtime.
@@ -285,7 +285,7 @@ class MetadataValidationTests(ServerTestCase):
             response, UNSUPPORTED_PROTOCOL_VERSION, status=HTTPStatus.BAD_REQUEST
         )
         assert error["data"] == {
-            "supported": example.server.supported_versions,
+            "supported": mcp.server.supported_versions,
             "requested": "2027-01-01",
         }
 
@@ -845,7 +845,7 @@ class CallLoggingTests(ServerTestCase):
 
         assert record.getMessage().startswith("Tool 'add': ok in ")
         assert record.getMessage().endswith("ms")
-        assert record.server is example.server
+        assert record.server is mcp.server
         assert record.request.path == "/mcp"
         assert record.tool == "add"
         assert record.arguments == {"a": 1, "b": 2}

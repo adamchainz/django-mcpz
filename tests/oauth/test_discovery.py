@@ -21,7 +21,7 @@ class DiscoveryTests(SimpleTestCase):
         assert discovery.issuer_for(request) == ISSUER
 
     def test_mcp_server_at(self):
-        from tests.example import oauth_server, server
+        from tests.mcp import oauth_server, server
 
         assert discovery.mcp_server_at("/oauth-mcp") is oauth_server
         assert discovery.mcp_server_at("/mcp") is server

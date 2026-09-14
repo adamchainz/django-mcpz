@@ -3,7 +3,7 @@ from __future__ import annotations
 from django.contrib import admin
 from django.urls import include, path
 
-from tests.example import (
+from tests.mcp import (
     bearer_tokens_server,
     oauth_server,
     perms_server,
