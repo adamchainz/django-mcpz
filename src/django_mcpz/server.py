@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import mimetypes
+import re
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -65,6 +66,9 @@ META_SERVER_INFO = "io.modelcontextprotocol/serverInfo"
 # permission-filtered tool lists depend on.
 _CACHE_FIELDS = {"ttlMs": 300_000, "cacheScope": "private"}
 
+# The specification's constraints on tool names.
+TOOL_NAME_RE = re.compile(r"[A-Za-z0-9_.-]{1,128}")
+
 
 class ToolError(Exception):
     """
@@ -76,7 +80,8 @@ class ToolError(Exception):
 @dataclass(frozen=True)
 class Icon:
     """
-    A tool icon served by this site, resolved to an absolute URL per request.
+    An icon for a server or a tool, served by this site and resolved to an
+    absolute URL per request.
     Clients are told to reject icons from other origins, so same-origin
     files are the natural home for them: a static file, or a URL path served
     by a view.
@@ -141,16 +146,16 @@ def _has_perm(codename: str) -> Callable[[HttpRequest], bool]:
     return check
 
 
+def _resolve_icons(
+    icons: tuple[Icon | dict[str, Any], ...], request: HttpRequest
+) -> list[dict[str, Any]]:
+    return [icon.resolve(request) if isinstance(icon, Icon) else icon for icon in icons]
+
+
 def _tool_definition(tool: Tool, request: HttpRequest) -> dict[str, Any]:
     if tool.icons is None:
         return tool.definition
-    return {
-        **tool.definition,
-        "icons": [
-            icon.resolve(request) if isinstance(icon, Icon) else icon
-            for icon in tool.icons
-        ],
-    }
+    return {**tool.definition, "icons": _resolve_icons(tool.icons, request)}
 
 
 @contextlib.contextmanager
@@ -211,7 +216,10 @@ class MCPServer:
         name: str,
         version: str,
         title: str | None = None,
+        description: str | None = None,
+        website_url: str | None = None,
         instructions: str | None = None,
+        icons: list[Icon | dict[str, Any]] | None = None,
         auth: Callable[[HttpRequest], HttpResponse | None],
         minimum_protocol_version: Literal["2025-03-26", "2026-07-28"] = "2025-03-26",
     ) -> None:
@@ -229,7 +237,12 @@ class MCPServer:
         self.server_info: dict[str, str] = {"name": name, "version": version}
         if title is not None:
             self.server_info["title"] = title
+        if description is not None:
+            self.server_info["description"] = description
+        if website_url is not None:
+            self.server_info["websiteUrl"] = website_url
         self.instructions = instructions
+        self.icons = tuple(icons) if icons is not None else None
         self.auth = auth
         self.minimum_protocol_version = minimum_protocol_version
         self._serve_legacy = minimum_protocol_version != PROTOCOL_VERSION
@@ -237,6 +250,12 @@ class MCPServer:
         if self._serve_legacy:
             self.supported_versions.extend(LEGACY_PROTOCOL_VERSIONS)
         self._tools: dict[str, Tool] = {}
+
+    def server_info_for(self, request: HttpRequest) -> dict[str, Any]:
+        """The server's name, version, title, and icons, for the request."""
+        if self.icons is None:
+            return self.server_info
+        return {**self.server_info, "icons": _resolve_icons(self.icons, request)}
 
     # Tool registration
 
@@ -259,6 +278,11 @@ class MCPServer:
 
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             tool_name = name if name is not None else func.__name__
+            if TOOL_NAME_RE.fullmatch(tool_name) is None:
+                raise ImproperlyConfigured(
+                    f"Tool name {tool_name!r} is invalid: names are 1 to 128"
+                    " characters of letters, digits, '_', '-', and '.'."
+                )
             if tool_name in self._tools:
                 raise ImproperlyConfigured(
                     f"A tool named {tool_name!r} is already registered."
@@ -393,7 +417,7 @@ class MCPServer:
             return error
 
         if method == "server/discover":
-            return self._discover(request_id)
+            return self._discover(request, request_id)
         elif method == "tools/list":
             return self._tools_list(request, request_id, params)
         elif method == "tools/call":
@@ -511,7 +535,7 @@ class MCPServer:
 
     # Method handlers
 
-    def _discover(self, request_id: str | int) -> HttpResponse:
+    def _discover(self, request: HttpRequest, request_id: str | int) -> HttpResponse:
         result: dict[str, Any] = {
             "supportedVersions": self.supported_versions,
             "capabilities": {"tools": {}},
@@ -519,7 +543,7 @@ class MCPServer:
         }
         if self.instructions is not None:
             result["instructions"] = self.instructions
-        return self._result(request_id, result)
+        return self._result(request, request_id, result)
 
     def _tools_list(
         self, request: HttpRequest, request_id: str | int, params: dict[str, Any]
@@ -530,6 +554,7 @@ class MCPServer:
             # at the JSON-RPC level, so HTTP 200 like any other response.
             return error_response(request_id, INVALID_PARAMS, "Invalid cursor")
         return self._result(
+            request,
             request_id,
             {
                 "tools": [
@@ -608,7 +633,9 @@ class MCPServer:
                 plural = "s" if len(unknown) > 1 else ""
                 return (
                     self._tool_error(
-                        request_id, f"Invalid arguments: unknown field{plural} {names}"
+                        request,
+                        request_id,
+                        f"Invalid arguments: unknown field{plural} {names}",
                     ),
                     "invalid_arguments",
                 )
@@ -618,7 +645,7 @@ class MCPServer:
                 tool_arguments = msgspec.convert(arguments, tool.input_type)
             except msgspec.ValidationError as exc:
                 return (
-                    self._tool_error(request_id, f"Invalid arguments: {exc}"),
+                    self._tool_error(request, request_id, f"Invalid arguments: {exc}"),
                     "invalid_arguments",
                 )
 
@@ -630,33 +657,38 @@ class MCPServer:
                     output = tool.func(request)
                 result = _tool_result(output)
         except ToolError as exc:
-            return self._tool_error(request_id, str(exc)), "tool_error"
+            return self._tool_error(request, request_id, str(exc)), "tool_error"
         except Exception:
             logger.exception("Tool %r raised an exception", tool.name)
             return (
                 self._tool_error(
-                    request_id, f"Tool {tool.name!r} failed unexpectedly."
+                    request, request_id, f"Tool {tool.name!r} failed unexpectedly."
                 ),
                 "exception",
             )
 
-        return self._result(request_id, result), "ok"
+        return self._result(request, request_id, result), "ok"
 
-    def _tool_error(self, request_id: str | int, text: str) -> HttpResponse:
+    def _tool_error(
+        self, request: HttpRequest, request_id: str | int, text: str
+    ) -> HttpResponse:
         # Tool execution failures are reported in-band, not as JSON-RPC
         # errors, so the calling model can see them and self-correct.
         return self._result(
+            request,
             request_id,
             {"content": [{"type": "text", "text": text}], "isError": True},
         )
 
-    def _result(self, request_id: str | int, result: dict[str, Any]) -> HttpResponse:
+    def _result(
+        self, request: HttpRequest, request_id: str | int, result: dict[str, Any]
+    ) -> HttpResponse:
         return result_response(
             request_id,
             {
                 "resultType": "complete",
                 **result,
-                "_meta": {META_SERVER_INFO: self.server_info},
+                "_meta": {META_SERVER_INFO: self.server_info_for(request)},
             },
         )
 

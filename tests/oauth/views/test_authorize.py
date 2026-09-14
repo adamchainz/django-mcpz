@@ -7,10 +7,10 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
-from django_mcpz.oauth import cimd
+from django_mcpz.oauth import cimd, views
 from django_mcpz.oauth.models import AuthorizationCode, Client
 from django_mcpz.tokens import sha256_hex
 from tests.oauth.utils import (
@@ -205,7 +205,16 @@ class AuthorizeTests(TestCase):
 
         assert response.status_code == HTTPStatus.OK
         self.assertContains(response, "Claude")
-        self.assertContains(response, RESOURCE)
+        self.assertContains(response, "<strong>OAuth server</strong>")
+        self.assertContains(response, f"<code>{RESOURCE}</code>")
+        self.assertContains(
+            response, '<img src="http://testserver/static/oauth/icon.png" alt="">'
+        )
+        self.assertContains(
+            response,
+            '<source srcset="http://testserver/static/oauth/icon-dark.png"'
+            ' media="(prefers-color-scheme: dark)">',
+        )
         self.assertContains(response, "alice")
         self.assertContains(response, "running on your computer")
         self.assertContains(response, "<code>mcp</code>")
@@ -344,3 +353,24 @@ class AuthorizeTests(TestCase):
         self.assertContains(
             response, "does not match its URL", status_code=HTTPStatus.BAD_REQUEST
         )
+
+
+class PickIconsTests(SimpleTestCase):
+    def test_none(self):
+        assert views.pick_icons([]) == (None, None)
+
+    def test_unthemed(self):
+        icon = {"src": "http://testserver/icon.png"}
+
+        assert views.pick_icons([icon]) == (icon, None)
+
+    def test_light_and_dark(self):
+        light = {"src": "http://testserver/light.png", "theme": "light"}
+        dark = {"src": "http://testserver/dark.png", "theme": "dark"}
+
+        assert views.pick_icons([dark, light]) == (light, dark)
+
+    def test_dark_only(self):
+        dark = {"src": "http://testserver/dark.png", "theme": "dark"}
+
+        assert views.pick_icons([dark]) == (dark, None)

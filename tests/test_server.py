@@ -40,7 +40,21 @@ if TYPE_CHECKING:
     # For the unresolvable-annotation test: known to mypy, absent at runtime.
     Missing = int
 
-SERVER_INFO = {"name": "example-server", "version": "1.2.3", "title": "Example Server"}
+SERVER_INFO = {
+    "name": "example-server",
+    "version": "1.2.3",
+    "title": "Example Server",
+    "description": "Exercises every feature of django-mcpz.",
+    "websiteUrl": "https://github.com/adamchainz/django-mcpz",
+    "icons": [
+        {
+            "src": "http://testserver/static/diner/icon.png",
+            "mimeType": "image/png",
+            "sizes": ["48x48"],
+        },
+        {"src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E"},
+    ],
+}
 
 
 # Module level, since msgspec resolves deferred annotations in module scope.
@@ -190,12 +204,12 @@ class TransportTests(ServerTestCase):
 
     @override_settings(DEBUG=True, ALLOWED_HOSTS=[])
     def test_origin_allowed_debug_localhost(self):
-        # server/discover rather than tools/list: resolving tool icons calls
-        # request.build_absolute_uri(), which validates the host header
-        # against the overridden empty ALLOWED_HOSTS.
+        # Resolving icons calls request.build_absolute_uri(), which validates
+        # the Host header against the overridden empty ALLOWED_HOSTS too, so
+        # send a localhost one.
         response = self.post(
             make_message("server/discover"),
-            headers={"Origin": "http://localhost:8000"},
+            headers={"Origin": "http://localhost:8000", "Host": "localhost:8000"},
         )
 
         assert response.status_code == HTTPStatus.OK
@@ -1137,3 +1151,29 @@ class ToolAutocommitTests(ServerTestCase, TransactionTestCase):
         result = self.assert_result(response)
         assert result["isError"] is False
         assert Widget.objects.count() == 1
+
+
+class ToolNameTests(SimpleTestCase):
+    def test_invalid_characters(self):
+        server = MCPServer(name="s", version="1", auth=public)
+
+        with pytest.raises(
+            ImproperlyConfigured, match="Tool name 'bad name' is invalid"
+        ):
+
+            @server.tool(description="Bad.", name="bad name")
+            def bad(request): ...
+
+    def test_too_long(self):
+        server = MCPServer(name="s", version="1", auth=public)
+
+        with pytest.raises(ImproperlyConfigured, match="is invalid"):
+
+            @server.tool(description="Bad.", name="a" * 129)
+            def bad(request): ...
+
+    def test_valid(self):
+        server = MCPServer(name="s", version="1", auth=public)
+
+        @server.tool(description="Good.", name="shop.orders-list_v2")
+        def good(request): ...

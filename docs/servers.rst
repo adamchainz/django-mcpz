@@ -131,11 +131,11 @@ The full rules of schema generation and validation are in :ref:`api-schemas`.
 Icons
 -----
 
-Tools can carry icons for display in client user interfaces.
+Servers and tools can carry icons for display in client user interfaces.
 The specification directs clients to reject icons from origins other than the MCP server’s own, so icons have to be served by your site.
 
 If your site serves its own static files, with a relative |STATIC_URL|__ such as ``"/static/"``, as with |WhiteNoise|__, pass :class:`Icon` instances with ``static`` set.
-django-mcpz resolves them to absolute URLs on the current host, per request, in ``tools/list`` responses:
+django-mcpz resolves them to absolute URLs on the current host, per request, in the server info and ``tools/list`` responses:
 
 .. |STATIC_URL| replace:: ``STATIC_URL``
 __ https://docs.djangoproject.com/en/stable/ref/settings/#static-url
@@ -146,7 +146,14 @@ __ https://whitenoise.readthedocs.io/
 
     import msgspec
 
-    from django_mcpz.server import Icon
+    from django_mcpz.server import Icon, MCPServer
+
+    server = MCPServer(
+        name="shop",
+        version="1.0.0",
+        icons=[Icon(static="shop/icon.png", sizes=("48x48",))],
+        auth=...,
+    )
 
 
     class SearchParams(msgspec.Struct):
@@ -162,6 +169,8 @@ __ https://whitenoise.readthedocs.io/
         ],
     )
     def search(request, params: SearchParams): ...
+
+A server’s icons also appear on the :doc:`OAuth <oauth>` consent page, beside its title.
 
 If ``STATIC_URL`` points at a CDN on another origin, static files will not do, since clients would reject them.
 Instead, serve the icon from a view on your site, such as one returning |FileResponse|__:

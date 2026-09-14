@@ -149,6 +149,22 @@ def resolve_redirect_uri(client: Client, redirect_uri: str | None) -> str:
     return redirect_uri
 
 
+def pick_icons(
+    icons: list[dict[str, Any]],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """
+    The server icon to show on the consent page, and a dark-scheme alternative.
+
+    The page follows the user's colour scheme from a light default, so an icon
+    without a theme, or for the light theme, comes first.
+    """
+    light = next((icon for icon in icons if icon.get("theme") != "dark"), None)
+    dark = next((icon for icon in icons if icon.get("theme") == "dark"), None)
+    if light is None:
+        return dark, None
+    return light, dark
+
+
 def resolve_resource(resource: str | None) -> str:
     if resource is None:
         raise AuthorizeError("invalid_target", "Missing resource.")
@@ -232,6 +248,10 @@ def _authorize(request: HttpRequest) -> HttpResponse:
     except AuthorizeError as exc:
         return redirect(error=exc.error, error_description=exc.description)
 
+    server = discovery.resolve_mcp_server(urlsplit(resource).path)
+    assert server is not None  # validate_resource() checked
+    info = server.server_info_for(request)
+    server_icon, server_icon_dark = pick_icons(info.get("icons", []))
     redirect_host = urlsplit(redirect_uri).hostname or ""
     context = {
         # Passed explicitly, so the template works without the auth context
@@ -242,6 +262,9 @@ def _authorize(request: HttpRequest) -> HttpResponse:
         "redirect_host": redirect_host,
         "redirect_is_local": redirect_host in LOCAL_HOSTS,
         "resource": resource,
+        "server_title": info.get("title", info["name"]),
+        "server_icon": server_icon,
+        "server_icon_dark": server_icon_dark,
         "scope": scope,
     }
     if request.method == "GET":
