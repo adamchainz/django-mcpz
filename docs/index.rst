@@ -13,6 +13,6 @@ django-mcpz documentation
    bearer_tokens
    api
    protocol
-   security
+   deployment
    example_project
    changelog

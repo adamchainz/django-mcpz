@@ -156,48 +156,6 @@ Assistants also revoke their own tokens when the user disconnects, through the r
 Expired and revoked codes and tokens, and clients that registered but never obtained a token, stay in the database until cleared.
 Clear them periodically with the ``mcpz oauth clear`` management command, or with the :func:`~tasks.clear_expired` task, as covered in :ref:`cleanup`.
 
-.. _cleanup:
-
-Scheduling cleanup
-------------------
-
-Both the bearer tokens app and the OAuth app provide their cleanup as a sub-command of the ``mcpz`` management command, for running from cron, and as a task for Django’s |tasks framework|__, on Django 6.0 and later:
-
-.. |tasks framework| replace:: tasks framework
-__ https://docs.djangoproject.com/en/stable/topics/tasks/
-
-.. code-block:: sh
-
-    python manage.py mcpz bearer-tokens clear
-    python manage.py mcpz oauth clear
-
-.. code-block:: python
-
-    from django_mcpz.oauth.tasks import clear_expired as clear_expired_oauth
-    from django_mcpz.bearer_tokens.tasks import clear_expired as clear_expired_bearer_tokens
-
-    clear_expired_bearer_tokens.enqueue()
-    clear_expired_oauth.enqueue()
-
-The tasks framework runs tasks but does not schedule them.
-To run the cleanup on a schedule, use a scheduler for the framework, such as |django-scheduled-tasks|__, which wraps a task with a cron expression and runs it from its ``run_task_scheduler`` management command:
-
-.. |django-scheduled-tasks| replace:: ``django-scheduled-tasks``
-__ https://github.com/lode-braced/django-scheduled-tasks
-
-.. code-block:: python
-
-    from django_scheduled_tasks import cron_task
-
-    from django_mcpz.oauth.tasks import clear_expired as clear_expired_oauth
-    from django_mcpz.bearer_tokens.tasks import clear_expired as clear_expired_bearer_tokens
-
-    cron_task(cron_schedule="0 4 * * *")(clear_expired_bearer_tokens)
-    cron_task(cron_schedule="0 4 * * *")(clear_expired_oauth)
-
-Put that in a module your project imports at startup, such as an app’s ``tasks.py``, so the schedules are registered.
-Once a day is plenty: nothing depends on expired rows being gone, and the tables grow by one row per login or refresh.
-
 .. _oauth-settings:
 
 Settings
