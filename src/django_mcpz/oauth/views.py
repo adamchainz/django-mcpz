@@ -30,9 +30,8 @@ from django_mcpz import tokens
 from django_mcpz.oauth import cimd, discovery
 from django_mcpz.oauth.conf import (
     LOCAL_HOSTS,
-    OAuthSettings,
-    get_settings,
     is_secure_url,
+    oauth_settings,
 )
 from django_mcpz.oauth.discovery import (
     canonical,
@@ -81,7 +80,6 @@ def authorization_server_metadata(
     """RFC 8414: describe the authorization server's endpoints and features."""
     if f"/{issuer_path}".rstrip("/") != discovery.issuer_path():
         raise Http404
-    conf = get_settings()
     issuer = issuer_for(request)
     document = {
         "issuer": issuer,
@@ -97,7 +95,7 @@ def authorization_server_metadata(
         "client_id_metadata_document_supported": True,
         "authorization_response_iss_parameter_supported": True,
     }
-    if conf.dynamic_registration:
+    if oauth_settings.dynamic_registration:
         document["registration_endpoint"] = f"{issuer}/register"
     return JsonResponse(document)
 
@@ -184,7 +182,6 @@ def authorize(request: HttpRequest) -> HttpResponse:
 # since a forged consent would let an attacker's client obtain a code.
 @csrf_protect
 def _authorize(request: HttpRequest) -> HttpResponse:
-    conf = get_settings()
     params = request.GET
     # Login comes first, so that only users of this site can make the server
     # fetch client metadata documents, or learn which clients it knows.
@@ -264,7 +261,7 @@ def _authorize(request: HttpRequest) -> HttpResponse:
         code_challenge=code_challenge,
         resource=resource,
         scope=scope,
-        expires_at=timezone.now() + conf.code_lifetime,
+        expires_at=timezone.now() + oauth_settings.code_lifetime,
     )
     return redirect(code=value)
 
@@ -294,7 +291,6 @@ def verify_pkce(code_verifier: str, code_challenge: str) -> bool:
 @require_POST
 def token(request: HttpRequest) -> HttpResponse:
     """Exchange an authorization code, or a refresh token, for tokens."""
-    conf = get_settings()
     params = request.POST
     grant_type = params.get("grant_type")
     try:
@@ -303,16 +299,16 @@ def token(request: HttpRequest) -> HttpResponse:
         return token_error("invalid_client", exc.description, HTTPStatus.UNAUTHORIZED)
 
     if grant_type == "authorization_code":
-        return exchange_code(conf, client, params)
+        return exchange_code(client, params)
     elif grant_type == "refresh_token":
-        return exchange_refresh_token(conf, client, params)
+        return exchange_refresh_token(client, params)
     return token_error(
         "unsupported_grant_type",
         "Supported grant types: authorization_code, refresh_token.",
     )
 
 
-def exchange_code(conf: OAuthSettings, client: Client, params: Any) -> HttpResponse:
+def exchange_code(client: Client, params: Any) -> HttpResponse:
     # The row is locked for the whole exchange, so that two requests
     # presenting the same code cannot both succeed: the second waits, then
     # finds the code used.
@@ -322,11 +318,13 @@ def exchange_code(conf: OAuthSettings, client: Client, params: Any) -> HttpRespo
             .filter(digest=digest_of(params.get("code", "")))
             .first()
         )
-        return _exchange_code(conf, client, params, code)
+        return _exchange_code(client, params, code)
 
 
 def _exchange_code(
-    conf: OAuthSettings, client: Client, params: Any, code: AuthorizationCode | None
+    client: Client,
+    params: Any,
+    code: AuthorizationCode | None,
 ) -> HttpResponse:
     if code is None or code.client_id != client.pk:
         return token_error("invalid_grant", "Unknown authorization code.")
@@ -349,12 +347,10 @@ def _exchange_code(
 
     code.used_at = timezone.now()
     code.save(update_fields=["used_at"])
-    return issue_tokens(conf, client, code)
+    return issue_tokens(client, code)
 
 
-def exchange_refresh_token(
-    conf: OAuthSettings, client: Client, params: Any
-) -> HttpResponse:
+def exchange_refresh_token(client: Client, params: Any) -> HttpResponse:
     # Locked as in exchange_code, so concurrent refreshes cannot both
     # rotate the same token.
     with transaction.atomic():
@@ -363,11 +359,13 @@ def exchange_refresh_token(
             .filter(digest=digest_of(params.get("refresh_token", "")))
             .first()
         )
-        return _exchange_refresh_token(conf, client, params, refresh)
+        return _exchange_refresh_token(client, params, refresh)
 
 
 def _exchange_refresh_token(
-    conf: OAuthSettings, client: Client, params: Any, refresh: RefreshToken | None
+    client: Client,
+    params: Any,
+    refresh: RefreshToken | None,
 ) -> HttpResponse:
     if refresh is None or refresh.client_id != client.pk:
         return token_error("invalid_grant", "Unknown refresh token.")
@@ -392,16 +390,17 @@ def _exchange_refresh_token(
     # The old access token is left to expire, since a client that refreshes
     # early may still have requests in flight with it. Reuse of this refresh
     # token revokes it along with the rest of the family.
-    return issue_tokens(conf, client, refresh)
+    return issue_tokens(client, refresh)
 
 
 def issue_tokens(
-    conf: OAuthSettings, client: Client, source: AuthorizationCode | RefreshToken
+    client: Client,
+    source: AuthorizationCode | RefreshToken,
 ) -> HttpResponse:
     """Create an access and refresh token pair from a code or refresh token."""
     code = source if isinstance(source, AuthorizationCode) else source.code
     access, access_value = AccessToken.create(
-        lifetime=conf.access_token_lifetime,
+        lifetime=oauth_settings.access_token_lifetime,
         client=client,
         user=source.user,
         code=code,
@@ -409,7 +408,7 @@ def issue_tokens(
         scope=source.scope,
     )
     _, refresh_value = RefreshToken.create(
-        lifetime=conf.refresh_token_lifetime,
+        lifetime=oauth_settings.refresh_token_lifetime,
         client=client,
         user=source.user,
         code=code,
@@ -421,7 +420,7 @@ def issue_tokens(
     body = {
         "access_token": access_value,
         "token_type": "Bearer",
-        "expires_in": int(conf.access_token_lifetime.total_seconds()),
+        "expires_in": int(oauth_settings.access_token_lifetime.total_seconds()),
         "refresh_token": refresh_value,
     }
     if source.scope:
@@ -476,8 +475,7 @@ def validate_registration(metadata: object) -> tuple[str, list[str]]:
 @require_POST
 def register(request: HttpRequest) -> HttpResponse:
     """RFC 7591: register a public client, returning its new client_id."""
-    conf = get_settings()
-    if not conf.dynamic_registration:
+    if not oauth_settings.dynamic_registration:
         return HttpResponse(status=HTTPStatus.NOT_FOUND)
     try:
         metadata = json.loads(request.body)
