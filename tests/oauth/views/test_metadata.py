@@ -51,7 +51,8 @@ class MetadataTests(TestCase):
 
     def test_protected_resource_host_case(self):
         response = self.client.get(
-            "/.well-known/oauth-protected-resource/oauth-mcp", HTTP_HOST="TESTSERVER"
+            "/.well-known/oauth-protected-resource/oauth-mcp",
+            headers={"host": "TESTSERVER"},
         )
 
         assert response.status_code == HTTPStatus.OK

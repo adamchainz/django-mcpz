@@ -40,7 +40,7 @@ def run_async(coroutine: Any) -> Any:
         return pool.submit(asyncio.run, coroutine).result()
 
 
-class MemoryStorage(TokenStorage):
+class MemoryStorage(TokenStorage):  # type: ignore[misc]
     def __init__(self) -> None:
         self.tokens: OAuthToken | None = None
         self.client_info: OAuthClientInformationFull | None = None
@@ -116,7 +116,7 @@ class OAuthClientTests(LiveServerTestCase):
             server_url=f"{self.live_server_url}/oauth-mcp",
             client_metadata=OAuthClientMetadata(
                 client_name="SDK test client",
-                redirect_uris=[REDIRECT_URI],  # type: ignore[list-item]
+                redirect_uris=[REDIRECT_URI],
                 grant_types=["authorization_code", "refresh_token"],
                 token_endpoint_auth_method="none",
             ),

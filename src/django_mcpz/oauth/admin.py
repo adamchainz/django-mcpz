@@ -37,6 +37,7 @@ class ClientAdmin(ClientModelAdmin):
         return False
 
 
+@admin.register(AccessToken)
 class TokenAdmin(TokenModelAdmin):
     list_display = ["client", "user", "created_at", "expires_at", "revoked_at"]
     list_filter = [("revoked_at", admin.EmptyFieldListFilter)]
@@ -71,10 +72,7 @@ class TokenAdmin(TokenModelAdmin):
         messages.success(request, f"Revoked {count} token(s).")
 
 
+@admin.register(RefreshToken)
 class RefreshTokenAdmin(TokenAdmin):
     readonly_fields = TokenAdmin.readonly_fields + ["access_token", "used_at"]
     fields = TokenAdmin.fields + ["access_token", "used_at"]
-
-
-admin.site.register(AccessToken, TokenAdmin)
-admin.site.register(RefreshToken, RefreshTokenAdmin)

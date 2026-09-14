@@ -64,5 +64,6 @@ repos:
     - django
     - django-msgspec
     - django-stubs==6.1.0
+    - httpx2
     - msgspec
     - pytest

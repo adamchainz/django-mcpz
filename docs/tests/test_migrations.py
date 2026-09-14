@@ -7,7 +7,7 @@ from django.test import TestCase
 
 
 class PendingMigrationsTests(TestCase):
-    def test_no_pending_migrations(self):
+    def test_no_pending_migrations(self) -> None:
         # No migrations pending
         # See: https://adamj.eu/tech/2024/06/23/django-test-pending-migrations/
         out = StringIO()

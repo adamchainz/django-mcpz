@@ -87,7 +87,7 @@ Setup
        server = MCPServer(
            name="shop",
            version="1.0.0",
-           auth=oauth_auth
+           auth=oauth_auth,
        )
 
 5. Make sure users can log in.
@@ -156,7 +156,7 @@ To serve both kinds of client from one server, write an ``auth`` callable that a
     server = MCPServer(
         name="shop",
         version="1.0.0",
-        auth=either_auth
+        auth=either_auth,
     )
 
 Managing clients and tokens

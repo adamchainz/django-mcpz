@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import tomllib
 
@@ -84,7 +85,8 @@ latex_documents = [
     ),
 ]
 
-def setup(app):
+
+def setup(app: Any) -> None:
     # A "setting" object type, like Django's own docs use, so settings get a
     # directive, an index entry, and a :setting: role for cross-references.
     app.add_object_type(
