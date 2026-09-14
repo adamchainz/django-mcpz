@@ -279,7 +279,9 @@ def widget_tool(request: HttpRequest, arguments: dict[str, Any]) -> str:
 
 # Authenticated with bearer tokens from the django_mcpz.bearer_tokens app.
 bearer_tokens_server = MCPServer(
-    name="bearer-tokens-server", version="1.0.0", auth=token_auth
+    name="bearer-tokens-server",
+    version="1.0.0",
+    auth=token_auth,
 )
 
 
@@ -302,7 +304,10 @@ def token_widget_tool(request: HttpRequest) -> str:
 # OAuth
 
 oauth_server = MCPServer(
-    name="oauth-server", version="1.0.0", title="OAuth server", auth=oauth_auth
+    name="oauth-server",
+    version="1.0.0",
+    title="OAuth server",
+    auth=oauth_auth,
 )
 
 
