@@ -60,6 +60,19 @@ class LegacyTests(ServerTestCase):
                 "name": "example-server",
                 "version": "1.2.3",
                 "title": "Example Server",
+                "description": "Exercises every feature of django-mcpz.",
+                "websiteUrl": "https://github.com/adamchainz/django-mcpz",
+                "icons": [
+                    {
+                        "src": "http://testserver/static/diner/icon.png",
+                        "mimeType": "image/png",
+                        "sizes": ["48x48"],
+                    },
+                    {
+                        "src": "data:image/svg+xml,"
+                        + "%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E"
+                    },
+                ],
             },
             "instructions": "Example MCP server used in the django-mcpz test suite.",
         }

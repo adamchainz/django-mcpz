@@ -16,7 +16,13 @@ server = MCPServer(
     name="example-server",
     version="1.2.3",
     title="Example Server",
+    description="Exercises every feature of django-mcpz.",
+    website_url="https://github.com/adamchainz/django-mcpz",
     instructions="Example MCP server used in the django-mcpz test suite.",
+    icons=[
+        Icon(static="diner/icon.png", sizes=("48x48",)),
+        {"src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E"},
+    ],
     auth=public,
 )
 
@@ -326,6 +332,10 @@ oauth_server = MCPServer(
     name="oauth-server",
     version="1.0.0",
     title="OAuth server",
+    icons=[
+        Icon(static="oauth/icon.png", sizes=("48x48",)),
+        Icon(static="oauth/icon-dark.png", sizes=("48x48",), theme="dark"),
+    ],
     auth=oauth_auth,
 )
 

@@ -6,7 +6,7 @@ Servers
 
 .. currentmodule:: django_mcpz.server
 
-.. class:: MCPServer(*, name, version, title=None, instructions=None, auth, minimum_protocol_version="2025-03-26")
+.. class:: MCPServer(*, name, version, title=None, description=None, website_url=None, instructions=None, icons=None, auth, minimum_protocol_version="2025-03-26")
 
     Represents one MCP server and its registry of tools.
     Like Django’s ``admin.site``, you create one, register things on it, and route it.
@@ -22,12 +22,24 @@ Servers
 
     :param title:
         Optional human-readable server name for display purposes.
+        Also shown on the :doc:`OAuth <oauth>` consent page, and reported in the server’s protected resource metadata, as the name for clients to list the connection under.
+
+    :param description:
+        Optional description of the server, for display purposes, reported alongside ``name``.
+
+    :param website_url:
+        Optional URL of a website about the server, or its organization, reported alongside ``name`` as ``websiteUrl``.
 
     :param instructions:
         Optional natural-language guidance for LLMs on how to use this server effectively, returned from |server/discover|__.
 
         .. |server/discover| replace:: ``server/discover``
         __ https://modelcontextprotocol.io/specification/draft/server/discover
+
+    :param icons:
+        Optional list of server icons for display in user interfaces, in the same forms as the ``icons`` parameter of :meth:`tool`.
+        Reported alongside ``name`` in the server info, and shown on the :doc:`OAuth <oauth>` consent page.
+        See :ref:`server-icons`.
 
     :param auth:
         Required.
@@ -96,6 +108,9 @@ Servers
         :param name:
             The tool name.
             Defaults to the decorated function’s name.
+            Per the specification, names are 1 to 128 characters of letters, digits, underscores, hyphens, and dots; anything else raises |ImproperlyConfigured|__.
+
+            __ https://docs.djangoproject.com/en/stable/ref/exceptions/#django.core.exceptions.ImproperlyConfigured
 
         :param title:
             Optional human-readable tool name for display purposes.
@@ -192,7 +207,7 @@ Servers
 
 .. class:: Icon(static=None, path=None, mime_type=None, sizes=None, theme=None)
 
-    A tool icon served by this site, from Django’s `static files <https://docs.djangoproject.com/en/stable/howto/static-files/>`__ or a URL path, for the ``icons`` parameter of :meth:`~MCPServer.tool`.
+    An icon for a server or a tool, served by this site from Django’s `static files <https://docs.djangoproject.com/en/stable/howto/static-files/>`__ or a URL path, for the ``icons`` parameters of :class:`MCPServer` and :meth:`~MCPServer.tool`.
     See :ref:`server-icons`.
 
     :param static:

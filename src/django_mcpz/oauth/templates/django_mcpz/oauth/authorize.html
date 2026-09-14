@@ -2,8 +2,19 @@
 {% block title %}Allow access?{% endblock %}
 {% block content %}
 <h1>Allow access?</h1>
+<p class=server>
+  {% if server_icon %}
+  <picture>
+    {% if server_icon_dark %}
+    <source srcset="{{ server_icon_dark.src }}" media="(prefers-color-scheme: dark)">
+    {% endif %}
+    <img src="{{ server_icon.src }}" alt="">
+  </picture>
+  {% endif %}
+  <span><strong>{{ server_title }}</strong><br><code>{{ resource }}</code></span>
+</p>
 <p>
-  <strong>{{ client }}</strong> wants to use <strong>{{ resource }}</strong>
+  <strong>{{ client }}</strong> wants to use this server
   as <strong>{{ user }}</strong>.
 </p>
 {% if scope %}

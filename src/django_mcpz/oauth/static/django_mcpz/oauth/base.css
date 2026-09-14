@@ -7,5 +7,7 @@ body {
   padding-inline: 1rem;
 }
 strong, code { overflow-wrap: anywhere; }
+.server { display: flex; align-items: center; gap: 1rem; }
+.server img { inline-size: 3rem; block-size: 3rem; }
 form { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 button { font: inherit; padding-block: 0.5rem; padding-inline: 1.25rem; }

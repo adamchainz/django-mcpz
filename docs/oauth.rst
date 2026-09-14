@@ -106,7 +106,7 @@ Then add your server’s URL to the assistant as a connector, and it will take y
 The consent page
 ----------------
 
-Every authorization shows a page naming the client, the MCP server, and the user, with “Allow” and “Deny” buttons.
+Every authorization shows a page naming the client, the MCP server, with its title and icon where it has them, and the user, with “Allow” and “Deny” buttons.
 It is shown every time, even for a client the user approved before, since anyone can register a client with any name, and the page is what lets the user notice an impostor.
 Requests that cannot be honoured, such as one from an unknown client, show an error page instead.
 
@@ -118,6 +118,7 @@ The two pages are rendered from three templates:
 ``django_mcpz/oauth/authorize.html``
     The consent page.
     Its context holds ``user``, ``client``, ``resource``, ``scope``, ``redirect_uri``, ``redirect_host``, and ``redirect_is_local``, the last being whether the client is redirecting to ``localhost``.
+    For the MCP server it holds ``server_title``, its title or else its name, and ``server_icon`` and ``server_icon_dark``, the icon to show and a dark-scheme alternative, each a ``dict`` with a ``src`` URL, or ``None``.
     It must keep a form that posts a ``decision`` field of ``allow`` or ``deny``, with a CSRF token.
 
 ``django_mcpz/oauth/error.html``

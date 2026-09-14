@@ -49,7 +49,7 @@ def legacy_dispatch(
         result: dict[str, Any] = {
             "protocolVersion": version,
             "capabilities": {"tools": {}},
-            "serverInfo": server.server_info,
+            "serverInfo": server.server_info_for(request),
         }
         if server.instructions is not None:
             result["instructions"] = server.instructions
@@ -57,7 +57,7 @@ def legacy_dispatch(
     elif method == "ping":
         return result_response(request_id, {})
     elif method == "server/discover":
-        return server._discover(request_id)
+        return server._discover(request, request_id)
     elif method == "tools/list":
         return server._tools_list(request, request_id, params)
     elif method == "tools/call":
