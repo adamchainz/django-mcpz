@@ -46,7 +46,7 @@ class TokenAdmin(ModelAdmin):
     ) -> None:
         if not change:
             value = tokens.generate()
-            obj.digest = Token.digest_of(value)
+            obj.digest = tokens.sha256_hex(value)
             messages.success(
                 request,
                 f"Token created. Its value, shown only this once, is: {value}",

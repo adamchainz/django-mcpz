@@ -19,8 +19,8 @@ from django_mcpz.oauth.models import (
     AuthorizationCode,
     Client,
     RefreshToken,
-    digest_of,
 )
+from django_mcpz.tokens import sha256_hex
 
 ISSUER = "http://testserver/oauth"
 RESOURCE = "http://testserver/oauth-mcp"
@@ -71,7 +71,7 @@ class TokenTestCase(TestCase):
         fields.setdefault("resource", RESOURCE)
         fields.setdefault("expires_at", timezone.now() + dt.timedelta(minutes=5))
         code = AuthorizationCode.objects.create(
-            digest=digest_of(value), code_challenge=challenge, **fields
+            digest=sha256_hex(value), code_challenge=challenge, **fields
         )
         return code, value, verifier
 
@@ -103,8 +103,8 @@ class TokenTestCase(TestCase):
         body: dict[str, Any] = response.json()
         assert body["token_type"] == "Bearer"
         assert body["expires_in"] == 3600
-        access = AccessToken.objects.get(digest=digest_of(body["access_token"]))
-        refresh = RefreshToken.objects.get(digest=digest_of(body["refresh_token"]))
+        access = AccessToken.objects.get(digest=sha256_hex(body["access_token"]))
+        refresh = RefreshToken.objects.get(digest=sha256_hex(body["refresh_token"]))
         assert refresh.access_token == access
         assert access.is_valid
         assert refresh.is_valid

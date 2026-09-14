@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import hashlib
 
 from django.conf import settings
 from django.contrib.auth.base_user import AbstractBaseUser
@@ -42,10 +41,6 @@ class Token(models.Model):
     def __str__(self) -> str:
         return self.name
 
-    @staticmethod
-    def digest_of(token: str) -> str:
-        return hashlib.sha256(token.encode()).hexdigest()
-
     @classmethod
     def create(
         cls,
@@ -61,7 +56,7 @@ class Token(models.Model):
         """
         value = tokens.generate()
         token = cls.objects.create(
-            name=name, user=user, expires_at=expires_at, digest=cls.digest_of(value)
+            name=name, user=user, expires_at=expires_at, digest=tokens.sha256_hex(value)
         )
         return token, value
 

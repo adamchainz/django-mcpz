@@ -13,8 +13,8 @@ from django_mcpz.oauth.models import (
     AuthorizationCode,
     Client,
     RefreshToken,
-    digest_of,
 )
+from django_mcpz.tokens import sha256_hex
 from tests.oauth.utils import (
     METADATA_URL,
     REDIRECT_URI,
@@ -108,8 +108,8 @@ class TokenCodeTests(TokenTestCase):
 
         body = self.assert_token_error(response, "invalid_grant")
         assert body["error_description"] == "Authorization code already used."
-        access = AccessToken.objects.get(digest=digest_of(first["access_token"]))
-        refresh = RefreshToken.objects.get(digest=digest_of(first["refresh_token"]))
+        access = AccessToken.objects.get(digest=sha256_hex(first["access_token"]))
+        refresh = RefreshToken.objects.get(digest=sha256_hex(first["refresh_token"]))
         assert not access.is_valid
         assert not refresh.is_valid
 
@@ -188,11 +188,13 @@ class TokenRefreshTests(TokenTestCase):
         assert second["scope"] == "mcp"
         assert second["access_token"] != first["access_token"]
         assert second["refresh_token"] != first["refresh_token"]
-        old_access = AccessToken.objects.get(digest=digest_of(first["access_token"]))
-        old_refresh = RefreshToken.objects.get(digest=digest_of(first["refresh_token"]))
+        old_access = AccessToken.objects.get(digest=sha256_hex(first["access_token"]))
+        old_refresh = RefreshToken.objects.get(
+            digest=sha256_hex(first["refresh_token"])
+        )
         assert old_access.is_valid, "Left to expire, for requests in flight."
         assert old_refresh.used_at is not None
-        new_access = AccessToken.objects.get(digest=digest_of(second["access_token"]))
+        new_access = AccessToken.objects.get(digest=sha256_hex(second["access_token"]))
         assert new_access.code == code
 
     def test_unknown(self):
@@ -215,8 +217,8 @@ class TokenRefreshTests(TokenTestCase):
         response = self.refresh(first["refresh_token"])
 
         self.assert_token_error(response, "invalid_grant")
-        access = AccessToken.objects.get(digest=digest_of(second["access_token"]))
-        refresh = RefreshToken.objects.get(digest=digest_of(second["refresh_token"]))
+        access = AccessToken.objects.get(digest=sha256_hex(second["access_token"]))
+        refresh = RefreshToken.objects.get(digest=sha256_hex(second["refresh_token"]))
         assert not access.is_valid
         assert not refresh.is_valid
 
@@ -228,9 +230,9 @@ class TokenRefreshTests(TokenTestCase):
         response = self.refresh(first["refresh_token"])
 
         self.assert_token_error(response, "invalid_grant")
-        access = AccessToken.objects.get(digest=digest_of(second["access_token"]))
+        access = AccessToken.objects.get(digest=sha256_hex(second["access_token"]))
         assert access.is_valid, "Only the reused token's own pair is revoked."
-        old = RefreshToken.objects.get(digest=digest_of(first["refresh_token"]))
+        old = RefreshToken.objects.get(digest=sha256_hex(first["refresh_token"]))
         assert not old.is_valid
 
     def test_expired(self):

@@ -48,7 +48,6 @@ from django_mcpz.oauth.models import (
     AuthorizationCode,
     Client,
     RefreshToken,
-    digest_of,
 )
 
 # Metadata documents
@@ -255,7 +254,7 @@ def _authorize(request: HttpRequest) -> HttpResponse:
 
     value = tokens.generate()
     AuthorizationCode.objects.create(
-        digest=digest_of(value),
+        digest=tokens.sha256_hex(value),
         client=client,
         user=request.user,
         redirect_uri=redirect_uri,
@@ -316,7 +315,7 @@ def exchange_code(client: Client, params: Any) -> HttpResponse:
     with transaction.atomic():
         code = (
             AuthorizationCode.objects.select_for_update()
-            .filter(digest=digest_of(params.get("code", "")))
+            .filter(digest=tokens.sha256_hex(params.get("code", "")))
             .first()
         )
         return _exchange_code(client, params, code)
@@ -357,7 +356,7 @@ def exchange_refresh_token(client: Client, params: Any) -> HttpResponse:
     with transaction.atomic():
         refresh = (
             RefreshToken.objects.select_for_update()
-            .filter(digest=digest_of(params.get("refresh_token", "")))
+            .filter(digest=tokens.sha256_hex(params.get("refresh_token", "")))
             .first()
         )
         return _exchange_refresh_token(client, params, refresh)
@@ -523,7 +522,7 @@ def revoke(request: HttpRequest) -> HttpResponse:
         client = load_client(params.get("client_id", ""), fetch=False)
     except AuthorizeError as exc:
         return token_error("invalid_client", exc.description, HTTPStatus.UNAUTHORIZED)
-    digest = digest_of(params.get("token", ""))
+    digest = tokens.sha256_hex(params.get("token", ""))
     # Look for a refresh token first, then an access token, regardless of
     # token_type_hint, which is only a hint.
     refresh = (

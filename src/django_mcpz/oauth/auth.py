@@ -5,7 +5,8 @@ from http import HTTPStatus
 from django.http import HttpRequest, HttpResponse
 
 from django_mcpz.oauth.discovery import resource_for, resource_metadata_url
-from django_mcpz.oauth.models import AccessToken, digest_of
+from django_mcpz.oauth.models import AccessToken
+from django_mcpz.tokens import sha256_hex
 
 
 def oauth_auth(request: HttpRequest) -> HttpResponse | None:
@@ -26,7 +27,7 @@ def oauth_auth(request: HttpRequest) -> HttpResponse | None:
         return _challenge(resource)
     token = (
         AccessToken.objects.select_related("user")
-        .filter(digest=digest_of(credential))
+        .filter(digest=sha256_hex(credential))
         .first()
     )
     if (

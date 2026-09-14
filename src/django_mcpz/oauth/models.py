@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import hashlib
 from typing import Any, TypeVar
 from urllib.parse import urlsplit
 
@@ -11,16 +10,13 @@ from django.db.models import Q
 from django.utils import timezone
 
 from django_mcpz import tokens
+from django_mcpz.tokens import sha256_hex
 
 # Field sizes, checked before saving values that clients supply, since most
 # databases reject longer strings rather than truncating them.
 URL_MAX_LENGTH = 500
 NAME_MAX_LENGTH = 200
 SCOPE_MAX_LENGTH = 500
-
-
-def digest_of(value: str) -> str:
-    return hashlib.sha256(value.encode()).hexdigest()
 
 
 class Client(models.Model):
@@ -163,7 +159,7 @@ class Token(models.Model):
         """Create a token, returning the instance and its secret value."""
         value = tokens.generate()
         token = cls._default_manager.create(
-            digest=digest_of(value),
+            digest=sha256_hex(value),
             expires_at=timezone.now() + lifetime,
             **fields,
         )

@@ -11,7 +11,8 @@ from django.test import TestCase
 from django.utils import timezone
 
 from django_mcpz.oauth import cimd
-from django_mcpz.oauth.models import AuthorizationCode, Client, digest_of
+from django_mcpz.oauth.models import AuthorizationCode, Client
+from django_mcpz.tokens import sha256_hex
 from tests.oauth.utils import (
     ISSUER,
     METADATA_URL,
@@ -252,7 +253,7 @@ class AuthorizeTests(TestCase):
         assert query["iss"] == [ISSUER]
         (value,) = query["code"]
         code = AuthorizationCode.objects.get()
-        assert code.digest == digest_of(value)
+        assert code.digest == sha256_hex(value)
         assert code.client == self.oauth_client
         assert code.user == self.user
         assert code.redirect_uri == REDIRECT_URI

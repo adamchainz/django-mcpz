@@ -21,7 +21,7 @@ class TokenModelTests(TestCase):
         token, value = Token.create(name="Alice’s laptop", user=self.user)
 
         assert value.startswith(tokens.PREFIX)
-        assert token.digest == Token.digest_of(value)
+        assert token.digest == tokens.sha256_hex(value)
         assert token.user == self.user
         assert list(self.user.mcp_bearer_tokens.all()) == [token]
         assert not token.is_revoked

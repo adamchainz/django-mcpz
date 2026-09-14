@@ -34,7 +34,7 @@ class MCPTokensCreateCommandTests(TestCase):
         token = Token.objects.get()
         assert token.name == "Laptop"
         assert token.user == user
-        assert token.digest == Token.digest_of(value)
+        assert token.digest == tokens.sha256_hex(value)
 
     def test_expires_in_days(self):
         User.objects.create_user("alice")

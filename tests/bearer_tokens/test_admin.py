@@ -5,6 +5,7 @@ from http import HTTPStatus
 from django.contrib.auth.models import User
 from django.test import TestCase
 
+from django_mcpz import tokens
 from django_mcpz.bearer_tokens.models import Token
 
 
@@ -30,7 +31,7 @@ class TokenAdminTests(TestCase):
             str(m) for m in response.context["messages"] if "shown only" in str(m)
         ]
         value = message.rsplit(" ", 1)[1]
-        assert Token.objects.get().digest == Token.digest_of(value)
+        assert Token.objects.get().digest == tokens.sha256_hex(value)
 
     def test_change_keeps_digest(self):
         token, value = Token.create(name="Old name", user=self.admin)
@@ -42,7 +43,7 @@ class TokenAdminTests(TestCase):
 
         token.refresh_from_db()
         assert token.name == "New name"
-        assert token.digest == Token.digest_of(value)
+        assert token.digest == tokens.sha256_hex(value)
 
     def test_change_cannot_unrevoke(self):
         token, _ = Token.create(name="t", user=self.admin)
