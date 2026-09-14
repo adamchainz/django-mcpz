@@ -109,7 +109,7 @@ Requests that cannot be honoured, such as one from an unknown client, show an er
 The two pages are rendered from three templates:
 
 ``django_mcpz/oauth/base.html``
-    The HTML document around both pages, with ``title`` and ``content`` blocks, a few inline styles that follow the user’s light or dark colour scheme, and a ``noindex`` robots tag.
+    The base HTML document for both pages, with ``title`` and ``content`` blocks, a link to the app’s ``django_mcpz/oauth/base.css`` static file, a ``color-scheme`` meta tag so the pages follow the user’s light or dark colour scheme, and a ``noindex`` robots tag.
 
 ``django_mcpz/oauth/authorize.html``
     The consent page.

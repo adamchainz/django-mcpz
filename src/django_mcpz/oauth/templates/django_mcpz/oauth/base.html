@@ -1,4 +1,4 @@
-<!doctype html>
+{% load static %}<!doctype html>
 <html lang=en>
 <head>
   <meta charset=utf-8>
@@ -6,19 +6,7 @@
   <meta name=color-scheme content="light dark">
   <meta name=robots content=noindex>
   <title>{% block title %}{% endblock %}</title>
-  <style>
-    body {
-      font-family: system-ui, sans-serif;
-      line-height: 1.5;
-      max-inline-size: 32rem;
-      margin-block: 3rem;
-      margin-inline: auto;
-      padding-inline: 1rem;
-    }
-    strong, code { overflow-wrap: anywhere; }
-    form { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-    button { font: inherit; padding-block: 0.5rem; padding-inline: 1.25rem; }
-  </style>
+  <link rel=stylesheet href="{% static 'django_mcpz/oauth/base.css' %}">
 </head>
 <body>
 <main>
