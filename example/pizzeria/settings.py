@@ -24,11 +24,22 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 INSTALLED_APPS = [
     "pizzeria",
     "django_mcpz",
+    "django.contrib.staticfiles",
 ]
+
+# Static files, for the server's icon, are served by runserver in DEBUG mode.
+STATIC_URL = "static/"
 
 MIDDLEWARE: list[str] = []
 
 ROOT_URLCONF = "pizzeria.urls"
+
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "APP_DIRS": True,
+    }
+]
 
 DATABASES: dict[str, dict[str, Any]] = {
     "default": {

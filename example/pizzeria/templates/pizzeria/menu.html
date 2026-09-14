@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang=en>
+<head>
+  <meta charset=utf-8>
+  <title>MCPizza menu for {{ on_date|date:"l j F Y" }}</title>
+</head>
+<body>
+  <h1>MCPizza menu for {{ on_date|date:"l j F Y" }}</h1>
+  {% if pizzas %}
+  <dl>
+    {% for pizza in pizzas %}
+    <dt>{{ pizza.name }}, {{ pizza.price }}{% if pizza.vegetarian %} (vegetarian){% endif %}</dt>
+    <dd>{{ pizza.description }}{% if pizza.notes %} <em>{{ pizza.notes }}</em>{% endif %}</dd>
+    {% endfor %}
+  </dl>
+  {% else %}
+  <p>Nothing on the menu that day.</p>
+  {% endif %}
+</body>
+</html>

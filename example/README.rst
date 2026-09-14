@@ -12,13 +12,18 @@ The important code lives in these files:
 * ``pizzeria/migrations/0002_menu.py``: the migration that seeds data.
   Specials are dated relative to the day you run the migrations.
 * ``pizzeria/mcp.py``: the MCP server and tools.
+* ``pizzeria/views.py`` and ``pizzeria/templates/pizzeria/menu.html``: the menu web page that the ``menu_link`` tool points at.
+* ``pizzeria/static/pizzeria/icon.svg``: the server’s icon, which clients show alongside its title.
 
-The three tools are:
+The five tools are:
 
 * ``current_date``: today’s date and weekday, so an LLM can work out what relative dates like “tomorrow” mean.
 * ``search_menu``: the pizzas available on a date, with an optional name query and price limit, returning the notes for the model to read.
 * ``place_order``: order a pizza from today’s menu, with a ``requests`` field for whatever the model gleaned from the notes.
   The server enforces the menu, rejecting pizzas not available today with an in-band error the model can act on.
+* ``orders_chart``: a pie chart of the pizzas ordered today, as a PNG image drawn with `Pillow <https://pypi.org/project/pillow/>`__, with the numbers behind it as text.
+  The text is there so the model can answer from it in clients that do not show it images.
+* ``menu_link``: a link to the menu web page for a date, past or future, for the user to open in a browser.
 
 Setup
 -----
@@ -27,11 +32,12 @@ In this directory, run:
 
 .. code-block:: sh
 
-    uv run manage.py migrate
-    uv run manage.py runserver
+    uv run --group example manage.py migrate
+    uv run --group example manage.py runserver
 
+The ``example`` dependency group adds Pillow, for the chart.
 Migrating creates an SQLite database seeded with the menu.
-The ``runserver`` should launch the MCP server at http://127.0.0.1:8066/mcp.
+The ``runserver`` should launch the MCP server at http://127.0.0.1:8066/mcp, with the menu web page at http://127.0.0.1:8066/menu/2026-01-01/ for any date.
 
 This example is unauthenticated (``auth=public``) and served on localhost only, as it’s a local demo, not something to expose to a network.
 See the `authentication docs <https://django-mcpz.readthedocs.io/en/latest/servers.html#authentication>`__ for adding auth.
@@ -101,6 +107,17 @@ Add ``--td`` to the command to enable tool debugging, which prints the model’s
     Tool call: place_order({'pizza': 'Margherita of Theseus', 'quantity': 5, 'requests': '2 with vegan cheese please, rest standard'})
       [TextContent(type='text', text='{"order_id":3,"pizza":"Margherita of Theseus","quantity":5,"requests":"2 with vegan cheese please, rest standard","total":47.5}', annotations=None, meta=None)]
 
+Once some orders exist, try the chart and the menu link:
+
+.. code-block:: console
+
+    $ LLM_TOOLS_MCP_CONFIG_DIR=. \
+      uvx --with llm-anthropic --with llm-tools-mcp --with "mcp<2" \
+      llm -m claude-sonnet-5 -T MCP --td \
+      "Which pizza is most popular today? Then give me a link to tomorrow's menu."
+
+.. TODO: paste example output.
+
 Test with ``claude``
 --------------------
 
@@ -150,6 +167,35 @@ Example output:
     - **Order ID:** 1
     - **Total:** $11.00
 
+The ``orders_chart`` tool returns an image alongside text.
+Claude Code shows PNG images to the model, so it can describe the chart itself, colours included:
+
+.. code-block:: sh
+
+    claude --mcp-config mcp.json --strict-mcp-config --allowedTools "mcp__mcpizza__*" \
+      -p "Fetch today's orders chart, describe what the image shows, and say which pizza is most popular."
+
+Example output:
+
+.. code-block:: text
+
+    Today's chart (2026-09-11) is a pie chart showing 11 total pizzas ordered, split four ways: Margherita of Theseus (5, 45%, blue), Pepperoni Overflow (3, 27%, orange), The Off-By-One (2, 18%, green), and Null Pointer (1, 9%, yellow).
+
+    **Margherita of Theseus** is the most popular pizza today, with nearly half of all orders.
+
+The ``menu_link`` tool returns a resource link, which the model passes on as a URL:
+
+.. code-block:: sh
+
+    claude --mcp-config mcp.json --strict-mcp-config --allowedTools "mcp__mcpizza__*" \
+      -p "Give me a link to tomorrow's menu."
+
+Example output:
+
+.. code-block:: text
+
+    Here's tomorrow's menu (2026-09-12): http://127.0.0.1:8066/menu/2026-09-12/
+
 Talking to it from Python
 -------------------------
 
@@ -168,6 +214,21 @@ The official `MCP Python SDK <https://pypi.org/project/mcp/>`__ (version 2+) can
             print([tool.name for tool in tools.tools])
             result = await client.call_tool("search_menu", {"max_price": 10})
             print(result.structured_content)
+            result = await client.call_tool("orders_chart", {})
+            for block in result.content:
+                print(type(block).__name__, getattr(block, "mime_type", None) or block.text)
+            result = await client.call_tool("menu_link", {"on_date": "2026-12-25"})
+            print(result.content[0].uri)
 
 
     asyncio.run(main())
+
+The chart comes back as a ``TextContent`` and an ``ImageContent`` block, whose ``data`` is the base64-encoded PNG, and the link as a ``ResourceLink``:
+
+.. code-block:: text
+
+    ['current_date', 'search_menu', 'place_order', 'orders_chart', 'menu_link']
+    {'date': '2026-09-11', 'pizzas': [{'name': 'Garlic Bread (Technically a Pizza)', ...}, ...]}
+    TextContent Pizzas ordered on 2026-09-11, 11 in total: Margherita of Theseus 5 (45%), Pepperoni Overflow 3 (27%), The Off-By-One 2 (18%), Null Pointer 1 (9%).
+    ImageContent image/png
+    http://127.0.0.1:8066/menu/2026-12-25/
