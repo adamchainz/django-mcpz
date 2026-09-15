@@ -13,6 +13,8 @@ Unreleased
 
 * Reject malformed URLs with unbalanced brackets, such as ``http://[::1``, in OAuth redirect URIs, resource URLs, and client ID metadata document URLs, rather than failing with a 500 response.
 
+* Reject OAuth ``resource`` and ``redirect_uri`` parameters longer than the fields they are stored in, rather than failing with a database error on databases that enforce field sizes.
+
 1.0.0 (2026-09-15)
 ------------------
 
