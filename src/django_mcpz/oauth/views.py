@@ -144,7 +144,11 @@ def resolve_redirect_uri(client: Client, redirect_uri: str | None) -> str:
         if len(client.redirect_uris) == 1:
             return str(client.redirect_uris[0])
         raise AuthorizeError("invalid_request", "Missing redirect_uri.")
-    if not client.allows_redirect_uri(redirect_uri):
+    # The loopback port allowance means a matching URI can be longer than
+    # the registered one, so the length is checked as well.
+    if len(redirect_uri) > URL_MAX_LENGTH or not client.allows_redirect_uri(
+        redirect_uri
+    ):
         raise AuthorizeError("invalid_request", "Unregistered redirect_uri.")
     return redirect_uri
 
@@ -168,6 +172,8 @@ def pick_icons(
 def resolve_resource(resource: str | None) -> str:
     if resource is None:
         raise AuthorizeError("invalid_target", "Missing resource.")
+    if len(resource) > URL_MAX_LENGTH:
+        raise AuthorizeError("invalid_target", "resource is too long.")
     validated = validate_resource(resource)
     if validated is None:
         raise AuthorizeError(
