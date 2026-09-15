@@ -494,8 +494,9 @@ class MCPServer:
     # The view
 
     # MCP clients are not browsers and authenticate per-request, so the
-    # server is exempt from CSRF checks.
+    # server is exempt from CSRF checks and from LoginRequiredMiddleware.
     csrf_exempt = True
+    login_required = False
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
         # The 2026-07-28 revision removed the GET/SSE stream and
