@@ -49,7 +49,6 @@ These are features for interactive or long-running conversations, which most Dja
   MCP version 2026-07-28 embeds these in an ``input_required`` tool result, which the client answers by retrying the call, so they fit a synchronous view and may come in a future version.
 * The ``x-mcp-header`` schema extension, for routing by proxies on parameter values.
   Schemas using it are rejected at registration time.
-* Async (ASGI) support and async tools, planned for a future version.
 
 .. _protocol-legacy:
 
