@@ -58,7 +58,11 @@ def validate_resource(resource: str) -> str | None:
     Valid means an HTTP(S) URL on one of this site's allowed hosts, with no
     query string or fragment, whose path is routed to an MCPServer.
     """
-    parts = urlsplit(resource)
+    try:
+        parts = urlsplit(resource)
+    except ValueError:
+        # Unbalanced brackets in the host, so not a URL at all.
+        return None
     if (
         parts.scheme.lower() not in ("http", "https")
         or parts.hostname is None

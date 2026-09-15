@@ -11,6 +11,8 @@ Unreleased
 * Send tool return values that serialize to JSON values other than objects, such as lists and numbers, as text content only, without ``structuredContent``.
   The specification requires ``structuredContent`` to be an object, and clients reject results where it is not.
 
+* Reject malformed URLs with unbalanced brackets, such as ``http://[::1``, in OAuth redirect URIs, resource URLs, and client ID metadata document URLs, rather than failing with a 500 response.
+
 1.0.0 (2026-09-15)
 ------------------
 
