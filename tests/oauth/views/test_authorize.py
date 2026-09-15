@@ -9,6 +9,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
+from unittest_parametrize import ParametrizedTestCase, parametrize
 
 from django_mcpz.oauth import cimd, views
 from django_mcpz.oauth.models import AuthorizationCode, Client
@@ -24,7 +25,7 @@ from tests.oauth.utils import (
 )
 
 
-class AuthorizeTests(TestCase):
+class AuthorizeTests(ParametrizedTestCase, TestCase):
     user: User
     oauth_client: Client
 
@@ -98,26 +99,29 @@ class AuthorizeTests(TestCase):
 
         assert response.status_code == HTTPStatus.OK
 
-    def test_loopback_redirect_uri_other_differences(self):
-        self.oauth_client.redirect_uris = ["http://127.0.0.1:3000/callback"]
-        self.oauth_client.save()
-
-        for uri in [
+    @parametrize(
+        "uri",
+        [
             "http://127.0.0.1:3000/other",
             "https://127.0.0.1:3000/callback",
             "http://localhost:41234/callback",
             "http://127.0.0.1:3000/callback?x=1",
             # Unbalanced brackets make urlsplit() raise, which must not leak.
             "http://[::1",
-        ]:
-            response = self.get(redirect_uri=uri)
+        ],
+    )
+    def test_loopback_redirect_uri_other_differences(self, uri):
+        self.oauth_client.redirect_uris = ["http://127.0.0.1:3000/callback"]
+        self.oauth_client.save()
 
-            self.assertContains(
-                response,
-                "Unregistered redirect_uri.",
-                status_code=HTTPStatus.BAD_REQUEST,
-                msg_prefix=uri,
-            )
+        response = self.get(redirect_uri=uri)
+
+        self.assertContains(
+            response,
+            "Unregistered redirect_uri.",
+            status_code=HTTPStatus.BAD_REQUEST,
+            msg_prefix=uri,
+        )
 
     def test_loopback_redirect_uri_too_long(self):
         # The port allowance could stretch a registered URI past the field
@@ -158,12 +162,15 @@ class AuthorizeTests(TestCase):
 
         self.assert_redirect_error(response, "invalid_request")
 
-    def test_invalid_code_challenge(self):
+    @parametrize(
+        "challenge",
         # Padding, and non-ASCII, which hmac.compare_digest cannot compare.
-        for challenge in ["a" * 42 + "=", "\u00e9" * 43]:
-            response = self.get(code_challenge=challenge)
+        ["a" * 42 + "=", "\u00e9" * 43],
+    )
+    def test_invalid_code_challenge(self, challenge):
+        response = self.get(code_challenge=challenge)
 
-            self.assert_redirect_error(response, "invalid_request")
+        self.assert_redirect_error(response, "invalid_request")
 
     def test_scope_too_long(self):
         response = self.get(scope="x" * 501)
@@ -175,8 +182,9 @@ class AuthorizeTests(TestCase):
 
         self.assert_redirect_error(response, "invalid_request")
 
-    def test_unknown_resource(self):
-        for resource in [
+    @parametrize(
+        "resource",
+        [
             "http://testserver/other",
             "http://testserver/admin/",
             "http://other.example/oauth-mcp",
@@ -184,10 +192,12 @@ class AuthorizeTests(TestCase):
             "http://[::1",
             # Longer than the field it would be stored in.
             "http://" + "a" * 500 + "@testserver/oauth-mcp",
-        ]:
-            response = self.get(resource=resource)
+        ],
+    )
+    def test_unknown_resource(self, resource):
+        response = self.get(resource=resource)
 
-            self.assert_redirect_error(response, "invalid_target")
+        self.assert_redirect_error(response, "invalid_target")
 
     def test_missing_resource(self):
         response = self.get(resource=None)

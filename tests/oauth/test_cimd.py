@@ -18,6 +18,7 @@ from unittest import mock
 import pytest
 from django.test import TestCase
 from django.utils import timezone
+from unittest_parametrize import ParametrizedTestCase, param, parametrize
 
 from django_mcpz.oauth import cimd
 from django_mcpz.oauth.models import Client
@@ -111,7 +112,7 @@ def local_https_server(
             server.server_close()
 
 
-class MetadataDocumentTests(TestCase):
+class MetadataDocumentTests(ParametrizedTestCase, TestCase):
     document = {
         "client_id": METADATA_URL,
         "client_name": "Metadata client",
@@ -273,19 +274,22 @@ class MetadataDocumentTests(TestCase):
         ):
             cimd.fetch_document(METADATA_URL)
 
-    def test_bad_redirect_uris(self):
-        for uris in [
-            [1],
-            ["http://client.example/cb"],
-            ["myapp://callback"],
-            ["https://client.example/cb#frag"],
-            ["https://client.example/" + "a" * 500],
-        ]:
-            with (
-                mock_metadata_fetch({**self.document, "redirect_uris": uris}),
-                pytest.raises(cimd.MetadataError, match="redirect_uris"),
-            ):
-                cimd.fetch_document(METADATA_URL)
+    @parametrize(
+        "uris",
+        [
+            param([1], id="non_string"),
+            param(["http://client.example/cb"], id="mismatched_client"),
+            param(["myapp://callback"], id="non_http"),
+            param(["https://client.example/cb#frag"], id="fragment"),
+            param(["https://client.example/" + "a" * 500], id="too_long"),
+        ],
+    )
+    def test_bad_redirect_uris(self, uris):
+        with (
+            mock_metadata_fetch({**self.document, "redirect_uris": uris}),
+            pytest.raises(cimd.MetadataError, match="redirect_uris"),
+        ):
+            cimd.fetch_document(METADATA_URL)
 
     def test_long_name_truncated(self):
         with mock_metadata_fetch({**self.document, "client_name": "n" * 300}):
