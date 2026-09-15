@@ -31,3 +31,5 @@ class SettingsTests(SimpleTestCase):
         assert is_secure_url("http://[::1]:3000/cb")
         assert not is_secure_url("http://example.com/cb")
         assert not is_secure_url("myapp://callback")
+        # Unbalanced brackets make urlsplit() raise, which must not leak.
+        assert not is_secure_url("http://[::1")

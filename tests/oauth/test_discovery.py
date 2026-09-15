@@ -47,6 +47,8 @@ class DiscoveryTests(SimpleTestCase):
             "http://testserver/oauth-mcp#x",
             "http://testserver/admin/",
             "http://testserver/nope",
+            # Unbalanced brackets make urlsplit() raise, which must not leak.
+            "http://[::1",
         ]:
             assert discovery.validate_resource(resource) is None, resource
 

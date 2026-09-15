@@ -64,6 +64,7 @@ class RegisterTests(TestCase):
             "http://example.com/cb",
             "myapp://callback",
             "https://example.com/cb#frag",
+            "http://[::1",
         ]:
             response = self.register({"redirect_uris": [uri]})
 

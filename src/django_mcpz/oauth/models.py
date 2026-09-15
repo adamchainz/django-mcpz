@@ -75,7 +75,11 @@ LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1"})
 
 def _loopback_match(uri: str, registered: str) -> bool:
     """Whether the URIs differ only by port, on a loopback IP address."""
-    a, b = urlsplit(uri), urlsplit(registered)
+    try:
+        a, b = urlsplit(uri), urlsplit(registered)
+    except ValueError:
+        # Unbalanced brackets in a host, so not a URL at all.
+        return False
     return (
         a.hostname in LOOPBACK_HOSTS
         and a.hostname == b.hostname
