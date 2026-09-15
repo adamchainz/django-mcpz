@@ -15,6 +15,9 @@ Unreleased
 
 * Reject OAuth ``resource`` and ``redirect_uri`` parameters longer than the fields they are stored in, rather than failing with a database error on databases that enforce field sizes.
 
+* Support OAuth on sites deployed under a path prefix, with ``SCRIPT_NAME`` or ``FORCE_SCRIPT_NAME``.
+  Resource URLs and the discovery document paths include the prefix, which is now stripped before matching them against the URLconf.
+
 1.0.0 (2026-09-15)
 ------------------
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 from urllib.parse import urlsplit
 
 from django.http import HttpRequest
-from django.urls import Resolver404, resolve, reverse
+from django.urls import Resolver404, get_script_prefix, resolve, reverse
 
 from django_mcpz.server import MCPServer, host_allowed
 
@@ -37,9 +37,15 @@ def issuer_url(request: HttpRequest) -> str:
 
 
 def resolve_mcp_server(path: str) -> MCPServer | None:
-    """The MCPServer the path is routed to, if any."""
+    """The MCPServer the full URL path is routed to, if any."""
+    # A site deployed under a path prefix, with SCRIPT_NAME or
+    # FORCE_SCRIPT_NAME, has that prefix in its URLs but not in its URLconf,
+    # so the path is made relative to it, as request.path_info is.
+    prefix = get_script_prefix()
+    if not path.startswith(prefix):
+        return None
     try:
-        match = resolve(path)
+        match = resolve(path[len(prefix) - 1 :])
     except Resolver404:
         return None
     server = match.func
