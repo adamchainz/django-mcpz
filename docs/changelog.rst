@@ -2,8 +2,8 @@
 Changelog
 =========
 
-Unreleased
-----------
+1.0.2 (2026-09-16)
+------------------
 
 * Exempt the MCP server view and the OAuth views from Django’s |LoginRequiredMiddleware|__.
   Previously, projects using that middleware had it redirect unauthenticated requests to the login page, before the server or its OAuth views could apply their own authentication.
