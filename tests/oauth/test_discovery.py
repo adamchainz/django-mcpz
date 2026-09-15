@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from django.test import RequestFactory, SimpleTestCase
+from django.test import RequestFactory, SimpleTestCase, override_settings
 
 from django_mcpz.oauth import discovery
 from tests.oauth.utils import ISSUER, RESOURCE
@@ -49,6 +49,15 @@ class DiscoveryTests(SimpleTestCase):
             "http://testserver/nope",
         ]:
             assert discovery.validate_resource(resource) is None, resource
+
+    @override_settings(ALLOWED_HOSTS=["[::1]"])
+    def test_validate_resource_ipv6(self):
+        # urlsplit() strips the brackets from IPv6 hosts, which ALLOWED_HOSTS
+        # entries keep.
+        assert discovery.validate_resource("http://[::1]:8000/oauth-mcp") == (
+            "http://[::1]:8000/oauth-mcp"
+        )
+        assert discovery.validate_resource("http://[::2]:8000/oauth-mcp") is None
 
     def test_resource_metadata_url(self):
         assert (
