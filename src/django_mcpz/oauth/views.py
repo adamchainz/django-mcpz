@@ -11,6 +11,7 @@ from http import HTTPStatus
 from typing import Any
 from urllib.parse import urlencode, urlsplit
 
+from django.contrib.auth.decorators import login_not_required
 from django.contrib.auth.views import redirect_to_login
 from django.db import transaction
 from django.http import (
@@ -53,6 +54,7 @@ from django_mcpz.oauth.models import (
 # Metadata documents
 
 
+@login_not_required
 def protected_resource_metadata(
     request: HttpRequest, resource_path: str = ""
 ) -> HttpResponse:
@@ -74,6 +76,7 @@ def protected_resource_metadata(
     )
 
 
+@login_not_required
 def authorization_server_metadata(
     request: HttpRequest, issuer_path: str = ""
 ) -> HttpResponse:
@@ -185,6 +188,7 @@ def resolve_resource(resource: str | None) -> str:
 # OAuth 2.1 section 7.10: the consent page must not be framed, so a hidden
 # page cannot trick the user into clicking Allow. Both the older header and
 # the CSP directive, for every response.
+@login_not_required
 @csrf_exempt
 @xframe_options_deny
 @frame_ancestors_none
@@ -316,6 +320,7 @@ def verify_pkce(code_verifier: str, code_challenge: str) -> bool:
     return hmac.compare_digest(expected, code_challenge)
 
 
+@login_not_required
 @csrf_exempt
 @require_POST
 def token(request: HttpRequest) -> HttpResponse:
@@ -500,6 +505,7 @@ def validate_registration(metadata: object) -> tuple[str, list[str]]:
     return name[:NAME_MAX_LENGTH], uris
 
 
+@login_not_required
 @csrf_exempt
 @require_POST
 def register(request: HttpRequest) -> HttpResponse:
@@ -542,6 +548,7 @@ def register(request: HttpRequest) -> HttpResponse:
 # Revocation
 
 
+@login_not_required
 @csrf_exempt
 @require_POST
 def revoke(request: HttpRequest) -> HttpResponse:
