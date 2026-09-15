@@ -3,6 +3,7 @@ from __future__ import annotations
 from http import HTTPStatus
 
 from django.test import TestCase, override_settings
+from django.test.utils import override_script_prefix
 
 from tests.oauth.utils import ISSUER, RESOURCE
 
@@ -57,6 +58,35 @@ class MetadataTests(TestCase):
 
         assert response.status_code == HTTPStatus.OK
         assert response.json()["resource"] == RESOURCE
+
+    # The site deployed under a path prefix: the documents keep their
+    # RFC-defined places at the host root, with the prefix in the paths they
+    # carry, so the deployment must route them to the site.
+    @override_settings(FORCE_SCRIPT_NAME="/app")
+    @override_script_prefix("/app/")
+    def test_under_prefix(self):
+        response = self.client.get(
+            "/.well-known/oauth-protected-resource/app/oauth-mcp"
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.json()["resource"] == "http://testserver/app/oauth-mcp"
+        assert response.json()["authorization_servers"] == [
+            "http://testserver/app/oauth"
+        ]
+
+        response = self.client.get("/.well-known/oauth-protected-resource/oauth-mcp")
+
+        assert response.status_code == HTTPStatus.NOT_FOUND
+
+        response = self.client.get("/.well-known/oauth-authorization-server/app/oauth")
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.json()["issuer"] == "http://testserver/app/oauth"
+
+        response = self.client.get("/.well-known/oauth-authorization-server/oauth")
+
+        assert response.status_code == HTTPStatus.NOT_FOUND
 
     def test_authorization_server(self):
         response = self.client.get("/.well-known/oauth-authorization-server/oauth")

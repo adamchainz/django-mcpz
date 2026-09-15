@@ -64,6 +64,11 @@ Setup
    This serves ``/oauth/authorize``, ``/oauth/token``, ``/oauth/register``, and ``/oauth/revoke``, plus the discovery documents at ``/.well-known/oauth-authorization-server/oauth`` and ``/.well-known/oauth-protected-resource/mcp``.
    Those last two paths follow from the endpoints’ path and the MCP server’s path, per the RFCs, so clients can find them.
    Nothing needs configuring: the app reads the paths from the URLconf, and the scheme and host from each request, as |build_absolute_uri()|__ does.
+   A site deployed under a path prefix, with ``SCRIPT_NAME`` or |FORCE_SCRIPT_NAME|__, has that prefix in all its URLs, including the two discovery paths, so with a prefix of ``/app`` the documents are at ``/.well-known/oauth-authorization-server/app/oauth`` and ``/.well-known/oauth-protected-resource/app/mcp``.
+   Those live at the host root, outside the prefix, so route them to the site.
+
+   .. |FORCE_SCRIPT_NAME| replace:: ``FORCE_SCRIPT_NAME``
+   __ https://docs.djangoproject.com/en/stable/ref/settings/#force-script-name
 
    .. |build_absolute_uri()| replace:: ``build_absolute_uri()``
    __ https://docs.djangoproject.com/en/stable/ref/request-response/#django.http.HttpRequest.build_absolute_uri

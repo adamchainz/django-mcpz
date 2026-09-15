@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from django.test import RequestFactory, SimpleTestCase, override_settings
+from django.test.utils import override_script_prefix
 
 from django_mcpz.oauth import discovery
 from tests.oauth.utils import ISSUER, RESOURCE
@@ -29,6 +30,25 @@ class DiscoveryTests(SimpleTestCase):
         assert discovery.resolve_mcp_server("/admin/") is None
         assert discovery.resolve_mcp_server("/nope") is None
         assert discovery.resolve_mcp_server("/") is None
+
+    @override_script_prefix("/app/")
+    def test_resolve_mcp_server_under_prefix(self):
+        from tests.mcp import oauth_server
+
+        assert discovery.resolve_mcp_server("/app/oauth-mcp") is oauth_server
+        assert discovery.resolve_mcp_server("/oauth-mcp") is None
+        assert discovery.resolve_mcp_server("/app") is None
+
+    @override_script_prefix("/app/")
+    def test_issuer_path_under_prefix(self):
+        assert discovery.issuer_path() == "/app/oauth"
+
+    @override_script_prefix("/app/")
+    def test_validate_resource_under_prefix(self):
+        assert discovery.validate_resource("http://testserver/app/oauth-mcp") == (
+            "http://testserver/app/oauth-mcp"
+        )
+        assert discovery.validate_resource(RESOURCE) is None
 
     def test_validate_resource(self):
         assert discovery.validate_resource(RESOURCE) == RESOURCE
