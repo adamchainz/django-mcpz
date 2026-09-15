@@ -119,6 +119,20 @@ class AuthorizeTests(TestCase):
                 msg_prefix=uri,
             )
 
+    def test_loopback_redirect_uri_too_long(self):
+        # The port allowance could stretch a registered URI past the field
+        # size, so the length is checked too.
+        registered = "http://127.0.0.1/" + "a" * 483
+        assert len(registered) == 500
+        self.oauth_client.redirect_uris = [registered]
+        self.oauth_client.save()
+
+        response = self.get(redirect_uri=registered.replace("/a", ":65535/a", 1))
+
+        self.assertContains(
+            response, "Unregistered redirect_uri.", status_code=HTTPStatus.BAD_REQUEST
+        )
+
     def test_missing_redirect_uri_single_registered(self):
         response = self.get(redirect_uri=None)
 
@@ -168,6 +182,8 @@ class AuthorizeTests(TestCase):
             "http://other.example/oauth-mcp",
             # Unbalanced brackets make urlsplit() raise, which must not leak.
             "http://[::1",
+            # Longer than the field it would be stored in.
+            "http://" + "a" * 500 + "@testserver/oauth-mcp",
         ]:
             response = self.get(resource=resource)
 
