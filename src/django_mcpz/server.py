@@ -107,7 +107,9 @@ class Icon:
         icon: dict[str, Any] = {"src": request.build_absolute_uri(location)}
         mime_type = self.mime_type
         if mime_type is None:
-            mime_type = mimetypes.guess_type(location)[0]
+            # From the path alone, since some static files storages append
+            # a query string, for cache busting or signing.
+            mime_type = mimetypes.guess_type(urlsplit(location).path)[0]
         if mime_type is not None:
             icon["mimeType"] = mime_type
         if self.sizes is not None:

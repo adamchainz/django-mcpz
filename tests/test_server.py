@@ -801,6 +801,15 @@ class IconTests(SimpleTestCase):
         with pytest.raises(ImproperlyConfigured, match="exactly one"):
             Icon()
 
+    def test_mime_type_guessed_ignoring_query_string(self):
+        request = RequestFactory().get("/")
+        icon = Icon(path="/mcp/icons/search.png?v=2")
+
+        assert icon.resolve(request) == {
+            "src": "http://testserver/mcp/icons/search.png?v=2",
+            "mimeType": "image/png",
+        }
+
     def test_unguessable_mime_type_omitted(self):
         request = RequestFactory().get("/")
         icon = Icon(static="diner/logo.mystery")

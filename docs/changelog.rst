@@ -18,6 +18,8 @@ Unreleased
 * Support OAuth on sites deployed under a path prefix, with ``SCRIPT_NAME`` or ``FORCE_SCRIPT_NAME``.
   Resource URLs and the discovery document paths include the prefix, which is now stripped before matching them against the URLconf.
 
+* Guess an ``Icon``’s MIME type from the path of its URL alone, ignoring any query string a static files storage appends.
+
 1.0.0 (2026-09-15)
 ------------------
 
