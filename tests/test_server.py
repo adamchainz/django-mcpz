@@ -217,6 +217,35 @@ class TransportTests(ServerTestCase):
 
         assert response.status_code == HTTPStatus.OK
 
+    @override_settings(DEBUG=True, ALLOWED_HOSTS=[])
+    def test_origin_allowed_debug_ipv6_loopback(self):
+        response = self.post(
+            make_message("server/discover"),
+            headers={"Origin": "http://[::1]:8000", "Host": "[::1]:8000"},
+        )
+
+        assert response.status_code == HTTPStatus.OK
+
+    @override_settings(ALLOWED_HOSTS=["[2001:db8::1]", "testserver"])
+    def test_origin_allowed_ipv6(self):
+        # urlsplit() strips the brackets from IPv6 hosts, which ALLOWED_HOSTS
+        # entries keep.
+        response = self.post(
+            make_message("tools/list"),
+            headers={"Origin": "https://[2001:db8::1]"},
+        )
+
+        assert response.status_code == HTTPStatus.OK
+
+    @override_settings(ALLOWED_HOSTS=["[2001:db8::1]", "testserver"])
+    def test_origin_disallowed_ipv6(self):
+        response = self.post(
+            make_message("tools/list"),
+            headers={"Origin": "https://[2001:db8::2]"},
+        )
+
+        assert response.status_code == HTTPStatus.FORBIDDEN
+
     def test_invalid_json(self):
         response = self.client.post(
             self.url, data=b"{not json", content_type="application/json"

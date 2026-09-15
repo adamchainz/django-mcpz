@@ -303,7 +303,15 @@ def _tool_result(output: Any) -> dict[str, Any]:
 
 
 def host_allowed(host: str) -> bool:
-    """Whether the host is in ALLOWED_HOSTS, with Django's DEBUG allowance."""
+    """
+    Whether the host is in ALLOWED_HOSTS, with Django's DEBUG allowance.
+
+    The host is a lowercase name or IP address without a port, as from
+    urlsplit().hostname, which strips the brackets from IPv6 addresses.
+    ALLOWED_HOSTS entries keep them, so they are put back for comparison.
+    """
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
     allowed_hosts = settings.ALLOWED_HOSTS
     if settings.DEBUG and not allowed_hosts:
         allowed_hosts = [".localhost", "127.0.0.1", "[::1]"]
