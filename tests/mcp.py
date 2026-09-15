@@ -269,6 +269,11 @@ def sig_noop(request: HttpRequest) -> None:
     return None
 
 
+@server.tool(description="A JSON value that is not an object.", read_only=True)
+def evens(request: HttpRequest) -> list[int]:
+    return [2, 4, 6]
+
+
 # Speaks only 2026-07-28: clients on earlier revisions are rejected.
 strict_server = MCPServer(
     name="strict-server",

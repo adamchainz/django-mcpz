@@ -169,8 +169,9 @@ Servers
         * a ``str`` becomes a single text content block.
         * ``None`` becomes an empty content list.
         * A content block, one of :class:`Text`, :class:`Image`, :class:`Audio`, :class:`ResourceLink`, or :class:`EmbeddedResource`, or a list of them, becomes the content list as given.
-        * Any other value becomes the result’s ``structuredContent``, plus its JSON serialization as a text content block for backwards compatibility, per the specification.
-          Values are serialized with msgspec, so tools can return anything it supports, including ``dataclasses`` and msgspec ``Struct`` types.
+        * Any other value is serialized to JSON with msgspec, so tools can return anything it supports, including ``dataclasses`` and msgspec ``Struct`` types.
+          A value that serializes to a JSON object, such as a ``dict`` or a ``Struct`` instance, becomes the result’s ``structuredContent``, plus its JSON serialization as a text content block for backwards compatibility, per the specification.
+          Any other JSON value, such as a list or a number, becomes a text content block only, since the specification requires ``structuredContent`` to be an object and clients reject results where it is not.
 
         If your tool declares an ``output_schema``, its return value must conform.
 
