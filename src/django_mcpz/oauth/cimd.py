@@ -36,7 +36,11 @@ class MetadataError(Exception):
 
 def is_metadata_url(client_id: str) -> bool:
     """Whether the client ID has the shape of a metadata document URL."""
-    parts = urlsplit(client_id)
+    try:
+        parts = urlsplit(client_id)
+    except ValueError:
+        # Unbalanced brackets in the host, so not a URL at all.
+        return False
     return (
         len(client_id) <= URL_MAX_LENGTH
         and parts.scheme == "https"
@@ -173,7 +177,10 @@ def fetch_document(url: str) -> dict[str, Any]:
         raise MetadataError("client_id is not an HTTPS URL with a path.")
     hostname = parts.hostname
     assert hostname is not None  # ensured by is_metadata_url
-    port = parts.port or 443
+    try:
+        port = parts.port or 443
+    except ValueError as exc:
+        raise MetadataError("client_id has an invalid port.") from exc
     address = resolve_public_address(hostname, port)
     path = parts.path + (f"?{parts.query}" if parts.query else "")
     try:

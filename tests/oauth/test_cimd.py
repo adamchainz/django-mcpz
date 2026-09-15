@@ -125,6 +125,12 @@ class MetadataDocumentTests(TestCase):
         assert not cimd.is_metadata_url("https://client.example")
         assert not cimd.is_metadata_url("https://client.example/")
         assert not cimd.is_metadata_url("https://client.example/" + "a" * 500)
+        # Unbalanced brackets make urlsplit() raise, which must not leak.
+        assert not cimd.is_metadata_url("https://[::1/client.json")
+
+    def test_invalid_port(self):
+        with pytest.raises(cimd.MetadataError, match="invalid port"):
+            cimd.fetch_document("https://client.example:x/client.json")
 
     def test_fetch_and_cache(self):
         fetch = mock.Mock(return_value=json.dumps(self.document).encode())

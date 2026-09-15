@@ -54,7 +54,11 @@ oauth_settings = OAuthSettings()
 
 def is_secure_url(url: str) -> bool:
     """Whether the URL is HTTPS, or plain HTTP to a local host."""
-    parts = urlsplit(url)
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        # Unbalanced brackets in the host, so not a URL at all.
+        return False
     if parts.scheme == "https":
         return True
     return parts.scheme == "http" and parts.hostname in LOCAL_HOSTS

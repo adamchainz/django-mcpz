@@ -107,6 +107,8 @@ class AuthorizeTests(TestCase):
             "https://127.0.0.1:3000/callback",
             "http://localhost:41234/callback",
             "http://127.0.0.1:3000/callback?x=1",
+            # Unbalanced brackets make urlsplit() raise, which must not leak.
+            "http://[::1",
         ]:
             response = self.get(redirect_uri=uri)
 
@@ -164,6 +166,8 @@ class AuthorizeTests(TestCase):
             "http://testserver/other",
             "http://testserver/admin/",
             "http://other.example/oauth-mcp",
+            # Unbalanced brackets make urlsplit() raise, which must not leak.
+            "http://[::1",
         ]:
             response = self.get(resource=resource)
 
