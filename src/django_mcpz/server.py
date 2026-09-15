@@ -296,9 +296,13 @@ def _tool_result(output: Any) -> dict[str, Any]:
     else:
         encoded = msgspec.json.encode(output, enc_hook=enc_hook)
         result["content"] = [{"type": "text", "text": encoded.decode()}]
-        # Reuse the encoding: msgspec inlines Raw values when serializing the
-        # response, avoiding encoding the output twice.
-        result["structuredContent"] = msgspec.Raw(encoded)
+        # structuredContent must be a JSON object, so other values, such as
+        # lists and numbers, travel as text only. Clients validate this, and
+        # some reject the whole result otherwise.
+        if encoded.startswith(b"{"):
+            # Reuse the encoding: msgspec inlines Raw values when serializing
+            # the response, avoiding encoding the output twice.
+            result["structuredContent"] = msgspec.Raw(encoded)
     return result
 
 

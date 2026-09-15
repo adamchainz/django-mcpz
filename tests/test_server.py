@@ -471,6 +471,7 @@ class ToolsListTests(ServerTestCase):
             "report_link",
             "mixed_content",
             "sig_noop",
+            "evens",
         ]
 
         add = result["tools"][0]
@@ -510,6 +511,16 @@ class ToolsCallTests(ServerTestCase):
         assert result["isError"] is False
         assert result["structuredContent"] == {"sum": 42}
         assert result["content"] == [{"type": "text", "text": '{"sum":42}'}]
+
+    def test_non_object_result(self):
+        # structuredContent must be a JSON object, so a list travels as text
+        # only, rather than as a value that clients reject.
+        response = self.call("evens")
+
+        result = self.assert_result(response)
+        assert result["isError"] is False
+        assert result["content"] == [{"type": "text", "text": "[2,4,6]"}]
+        assert "structuredContent" not in result
 
     def test_text_result(self):
         response = self.call("greet", {"name": "Alice"})

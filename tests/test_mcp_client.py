@@ -88,6 +88,7 @@ class MCPClientTests(SimpleTestCase):
             "report_link",
             "mixed_content",
             "sig_noop",
+            "evens",
         ]
         add = result.tools[0]
         assert add.description == "Add two integers."
