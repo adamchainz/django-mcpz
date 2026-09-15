@@ -4,11 +4,12 @@ from http import HTTPStatus
 
 from django.test import TestCase, override_settings
 from django.test.utils import override_script_prefix
+from unittest_parametrize import ParametrizedTestCase, parametrize
 
 from tests.oauth.utils import ISSUER, RESOURCE
 
 
-class MetadataTests(TestCase):
+class MetadataTests(ParametrizedTestCase, TestCase):
     def test_protected_resource(self):
         response = self.client.get("/.well-known/oauth-protected-resource/oauth-mcp")
 
@@ -27,15 +28,18 @@ class MetadataTests(TestCase):
 
         assert response.json()["resource_name"] == "bearer-tokens-server"
 
-    def test_protected_resource_not_a_server(self):
-        for path in [
+    @parametrize(
+        "path",
+        [
             "/.well-known/oauth-protected-resource",
             "/.well-known/oauth-protected-resource/admin/",
             "/.well-known/oauth-protected-resource/nope",
-        ]:
-            response = self.client.get(path)
+        ],
+    )
+    def test_protected_resource_not_a_server(self, path):
+        response = self.client.get(path)
 
-            assert response.status_code == HTTPStatus.NOT_FOUND, path
+        assert response.status_code == HTTPStatus.NOT_FOUND, path
 
     def test_protected_resource_names_request_scheme_and_host(self):
         response = self.client.get(
@@ -113,12 +117,15 @@ class MetadataTests(TestCase):
 
         assert "registration_endpoint" not in response.json()
 
-    def test_authorization_server_wrong_path(self):
-        for path in [
+    @parametrize(
+        "path",
+        [
             "/.well-known/oauth-authorization-server",
             "/.well-known/oauth-authorization-server/other",
             "/.well-known/oauth-authorization-server/oauth/authorize",
-        ]:
-            response = self.client.get(path)
+        ],
+    )
+    def test_authorization_server_wrong_path(self, path):
+        response = self.client.get(path)
 
-            assert response.status_code == HTTPStatus.NOT_FOUND, path
+        assert response.status_code == HTTPStatus.NOT_FOUND, path

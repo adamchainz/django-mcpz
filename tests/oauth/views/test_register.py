@@ -5,12 +5,13 @@ from http import HTTPStatus
 from typing import Any
 
 from django.test import TestCase, override_settings
+from unittest_parametrize import ParametrizedTestCase, parametrize
 
 from django_mcpz.oauth.models import Client
 from tests.oauth.utils import REDIRECT_URI
 
 
-class RegisterTests(TestCase):
+class RegisterTests(ParametrizedTestCase, TestCase):
     def register(self, metadata: Any) -> Any:
         return self.client.post(
             "/oauth/register",
@@ -59,16 +60,19 @@ class RegisterTests(TestCase):
 
         assert response.json()["error"] == "invalid_redirect_uri"
 
-    def test_insecure_redirect_uri(self):
-        for uri in [
+    @parametrize(
+        "uri",
+        [
             "http://example.com/cb",
             "myapp://callback",
             "https://example.com/cb#frag",
             "http://[::1",
-        ]:
-            response = self.register({"redirect_uris": [uri]})
+        ],
+    )
+    def test_insecure_redirect_uri(self, uri):
+        response = self.register({"redirect_uris": [uri]})
 
-            assert response.json()["error"] == "invalid_redirect_uri", uri
+        assert response.json()["error"] == "invalid_redirect_uri", uri
 
     def test_non_string_redirect_uri(self):
         response = self.register({"redirect_uris": [1]})

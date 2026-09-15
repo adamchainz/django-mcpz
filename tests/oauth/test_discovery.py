@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from django.test import RequestFactory, SimpleTestCase, override_settings
 from django.test.utils import override_script_prefix
+from unittest_parametrize import ParametrizedTestCase, parametrize
 
 from django_mcpz.oauth import discovery
 from tests.oauth.utils import ISSUER, RESOURCE
 
 
-class DiscoveryTests(SimpleTestCase):
+class DiscoveryTests(ParametrizedTestCase, SimpleTestCase):
     def test_canonical(self):
         assert discovery.canonical("HTTPS://Example.COM/MCP?x=1") == (
             "https://example.com/MCP?x=1"
@@ -57,8 +58,9 @@ class DiscoveryTests(SimpleTestCase):
             "https://testserver/oauth-mcp"
         )
 
-    def test_validate_resource_invalid(self):
-        for resource in [
+    @parametrize(
+        "resource",
+        [
             "ftp://testserver/oauth-mcp",
             "testserver/oauth-mcp",
             "http:///oauth-mcp",
@@ -69,8 +71,10 @@ class DiscoveryTests(SimpleTestCase):
             "http://testserver/nope",
             # Unbalanced brackets make urlsplit() raise, which must not leak.
             "http://[::1",
-        ]:
-            assert discovery.validate_resource(resource) is None, resource
+        ],
+    )
+    def test_validate_resource_invalid(self, resource):
+        assert discovery.validate_resource(resource) is None, resource
 
     @override_settings(ALLOWED_HOSTS=["[::1]"])
     def test_validate_resource_ipv6(self):

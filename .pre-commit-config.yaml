@@ -67,3 +67,4 @@ repos:
     - httpx2
     - msgspec
     - pytest
+    - unittest-parametrize
