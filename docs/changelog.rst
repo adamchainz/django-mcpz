@@ -2,6 +2,14 @@
 Changelog
 =========
 
+Unreleased
+----------
+
+* Fix OAuth compatibility with ChatGPT.
+  Correctly parse the ``token_endpoint_auth_methods_supported`` field from client ID metadata documents, allowing its discovery document to be used for OAuth client registration.
+
+  Thanks to Jamie Matthews in `PR #22 <https://github.com/adamchainz/django-mcpz/pull/22>`__.
+
 1.0.2 (2026-09-16)
 ------------------
 
