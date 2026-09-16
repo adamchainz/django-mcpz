@@ -297,6 +297,50 @@ class MetadataDocumentTests(ParametrizedTestCase, TestCase):
 
         assert client.name == "n" * 200
 
+    @parametrize(
+        "method",
+        [
+            param("private_key_jwt", id="legacy_preference"),
+            param(None, id="plural_only"),
+        ],
+    )
+    def test_supported_public_auth(self, method):
+        document = {
+            **self.document,
+            "token_endpoint_auth_methods_supported": ["none", "private_key_jwt"],
+        }
+        if method is not None:
+            document["token_endpoint_auth_method"] = method
+        with mock_metadata_fetch(document):
+            client = cimd.get_metadata_client(METADATA_URL)
+
+        assert client.client_id == METADATA_URL
+        assert client.redirect_uris == self.document["redirect_uris"]
+
+    @parametrize(
+        "methods",
+        [
+            param(["private_key_jwt"], id="confidential_only"),
+            param([], id="empty"),
+            param("none", id="string"),
+            param({"none": True}, id="object"),
+            param(None, id="null"),
+            param(["none", 1], id="non_string_member"),
+        ],
+    )
+    def test_unsupported_auth_methods(self, methods):
+        with (
+            mock_metadata_fetch(
+                {
+                    **self.document,
+                    "token_endpoint_auth_method": "none",
+                    "token_endpoint_auth_methods_supported": methods,
+                }
+            ),
+            pytest.raises(cimd.MetadataError, match="public clients"),
+        ):
+            cimd.fetch_document(METADATA_URL)
+
     def test_confidential_client(self):
         with (
             mock_metadata_fetch(

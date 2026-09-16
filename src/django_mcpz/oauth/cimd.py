@@ -239,10 +239,19 @@ def validate_document(document: object, url: str) -> dict[str, Any]:
                 f"Client metadata redirect_uris must be HTTPS, or HTTP on"
                 f" localhost, without a fragment: {uri!r}."
             )
-    method = document.get("token_endpoint_auth_method", "none")
-    if method != "none":
+
+    if "token_endpoint_auth_methods_supported" in document:
+        methods = document["token_endpoint_auth_methods_supported"]
+    else:
+        # Legacy single-value field.
+        methods = [document.get("token_endpoint_auth_method", "none")]
+    if (
+        not isinstance(methods, list)
+        or not all(isinstance(method, str) for method in methods)
+        or "none" not in methods
+    ):
         raise MetadataError(
-            f"Unsupported token_endpoint_auth_method {method!r}: only public"
-            " clients are supported."
+            f"Unsupported token endpoint authentication methods {methods!r}:"
+            " only public clients are supported."
         )
     return document
