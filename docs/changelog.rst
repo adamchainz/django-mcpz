@@ -2,8 +2,8 @@
 Changelog
 =========
 
-Unreleased
-----------
+1.0.3 (2026-09-16)
+------------------
 
 * Fix OAuth compatibility with ChatGPT.
   Correctly parse the ``token_endpoint_auth_methods_supported`` field from client ID metadata documents, allowing its discovery document to be used for OAuth client registration.
