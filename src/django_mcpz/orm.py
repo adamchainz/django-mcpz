@@ -1004,9 +1004,9 @@ class _QueryTool:
             " django.utils.timezone. Only read-only QuerySet methods are"
             " allowed. Follow relations with double underscores, as in"
             ' values("category__name"). Results are returned as Python'
-            f" literals, at most {self.max_rows} rows: slice the query, like"
-            f" [0:{self.max_rows}] then [{self.max_rows}:{2 * self.max_rows}],"
-            f" to page through more.{timeout}"
+            f" literals, at most {self.max_rows} rows per call. When a query has"
+            " more, the result names the slice to send for the next page, like"
+            f" [{self.max_rows}:{2 * self.max_rows}].{timeout}"
         )
         if instructions is not None:
             text += f"\n\n{instructions}"
@@ -1150,12 +1150,15 @@ class _QueryTool:
                         )
                 value = evaluator.run(source)
                 evaluator.check_result(value)
-                truncated = False
+                next_page = None
                 if isinstance(value, QuerySet):
+                    # Fetch one row more than the limit, to learn whether
+                    # the query has more, without counting them all.
+                    start = value.query.low_mark
                     value = list(value[: self.max_rows + 1])
                     if len(value) > self.max_rows:
                         value = value[: self.max_rows]
-                        truncated = True
+                        next_page = (start + self.max_rows, start + 2 * self.max_rows)
         except ToolError:
             raise
         except DatabaseError as exc:
@@ -1168,10 +1171,11 @@ class _QueryTool:
         except Exception as exc:
             raise ToolError(f"{type(exc).__name__}: {exc}") from None
         text = pprint.pformat(value, width=100, sort_dicts=False)
-        if truncated:
+        if next_page is not None:
             text += (
-                f"\n\nOnly the first {self.max_rows} rows are shown, as the query"
-                " returned more. Narrow it, or slice it to page through the rest."
+                f"\n\nThe query has more rows than the {self.max_rows} shown."
+                " For the next page, send it again sliced"
+                f" [{next_page[0]}:{next_page[1]}], or narrow it."
             )
         return text
 

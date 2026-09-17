@@ -878,9 +878,30 @@ class QueryTests(QueryToolTestCase):
 
         assert text == (
             "['Ball', 'Drill']\n\n"
-            "Only the first 2 rows are shown, as the query returned more."
-            " Narrow it, or slice it to page through the rest."
+            "The query has more rows than the 2 shown. For the next page, send"
+            " it again sliced [2:4], or narrow it."
         )
+
+    def test_row_cap_next_page(self):
+        # The next page continues from where the query's own slice starts.
+        text = self.query(
+            "from tests.models import Widget\nresult = Widget.objects.values_list('name', flat=True)[1:100]",
+            max_rows=2,
+        )
+
+        assert text == (
+            "['Drill', 'Hammer']\n\n"
+            "The query has more rows than the 2 shown. For the next page, send"
+            " it again sliced [3:5], or narrow it."
+        )
+
+    def test_row_cap_last_page(self):
+        text = self.query(
+            "from tests.models import Widget\nresult = Widget.objects.values_list('name', flat=True)[2:4]",
+            max_rows=2,
+        )
+
+        assert text == "['Hammer', 'Yo-yo']"
 
     def test_slicing(self):
         assert (

@@ -119,7 +119,8 @@ Other databases run without a timeout.
 A query that times out is cancelled and reported to the model as an error suggesting it narrow the query.
 
 ``max_rows``, 200 by default, caps the rows returned from a query.
-The result notes when a query returned more, and the model can page through by slicing, as in ``[200:400]``.
+Querysets are sliced to that many rows before they run, plus one to learn whether more exist without counting them, so an unsliced query never pulls a whole table.
+When a query has more rows, the result names the slice to send next, as in ``[200:400]``, continuing from the query’s own slice if it had one, so the model can page through.
 
 ``using`` runs every query on the named database alias, such as a read replica, instead of the one the database routers choose.
 
