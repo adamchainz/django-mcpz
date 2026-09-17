@@ -2,6 +2,13 @@
 Changelog
 =========
 
+Unreleased
+----------
+
+* Add form mode elicitation, so a tool can ask the user a question mid-call with the new ``elicit()`` function, such as a confirmation before a consequential action.
+  The new ``ElicitationDeclinedError`` and ``ElicitationUnavailableError`` exceptions report a refusal, and the call log gains an ``"input_required"`` outcome.
+  Clients on the 2025 versions cannot answer questions, since those versions have no way to carry one.
+
 1.0.3 (2026-09-16)
 ------------------
 

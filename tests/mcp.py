@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import enum
 from http import HTTPStatus
 from typing import Annotated, Any
 
@@ -16,6 +17,7 @@ from django_mcpz.server import (
     ResourceLink,
     Text,
     ToolError,
+    elicit,
     public,
 )
 from tests.models import Widget
@@ -378,3 +380,97 @@ def oauth_whoami(request: HttpRequest) -> dict[str, Any]:
         "client": request.mcp_token.client.name,  # type: ignore[attr-defined]
         "user": request.user.get_username(),
     }
+
+
+# Elicitation: the tool asks the user a question, and the client answers it by
+# calling the tool again, so the tool runs once per question. The user comes
+# from a header, as for perms_server, so that state binding can be exercised.
+
+elicitation_server = MCPServer(
+    name="elicitation-server",
+    version="1.0.0",
+    auth=header_user_auth,
+)
+
+
+class Confirmation(msgspec.Struct):
+    confirmed: bool = False
+
+
+class Flavour(enum.Enum):
+    vanilla = "vanilla"
+    chocolate = "chocolate"
+
+
+class Dessert(msgspec.Struct):
+    flavour: Flavour
+    scoops: Annotated[int, msgspec.Meta(ge=1, le=3)] = 1
+
+
+@elicitation_server.tool(description="Ask for confirmation, then report it.")
+def confirm(request: HttpRequest) -> str:
+    answer = elicit(request, "Really do the thing?", Confirmation)
+    return f"Confirmed: {answer.confirmed}"
+
+
+@elicitation_server.tool(description="Ask two questions, one after the other.")
+def order_dessert(request: HttpRequest) -> dict[str, Any]:
+    dessert = elicit(request, "What would you like?", Dessert)
+    tip = elicit(request, "Add a tip?", Confirmation)
+    return {
+        "flavour": dessert.flavour.value,
+        "scoops": dessert.scoops,
+        "tip": tip.confirmed,
+    }
+
+
+@elicitation_server.tool(description="Ask with a plain schema, under a fixed key.")
+def ask_name(request: HttpRequest) -> str:
+    answer = elicit(
+        request,
+        "What is your name?",
+        {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        },
+        key="name",
+    )
+    return f"Hello, {answer['name']}!"
+
+
+@elicitation_server.tool(description="Ask twice under one key, which is a mistake.")
+def ask_twice_under_one_key(request: HttpRequest) -> str:
+    elicit(request, "First?", Confirmation, key="same")
+    elicit(request, "Second?", Confirmation, key="same")
+    return "unreachable"  # pragma: no cover
+
+
+class Target(msgspec.Struct):
+    a: int
+    b: int
+
+
+@elicitation_server.tool(description="Ask about the arguments it was given.")
+def confirm_arguments(request: HttpRequest, params: Target) -> str:
+    answer = elicit(request, f"Proceed with {params.a} and {params.b}?", Confirmation)
+    return f"Confirmed: {answer.confirmed}"
+
+
+@elicitation_server.tool(description="Create a widget, then ask whether to keep it.")
+def confirm_widget(request: HttpRequest) -> str:
+    Widget.objects.create(name="pending", price=1)
+    elicit(request, "Keep the widget?", Confirmation)
+    return "Kept."
+
+
+@elicitation_server.tool(description="Ask for something form mode cannot collect.")
+def ask_impossible(request: HttpRequest) -> str:
+    elicit(request, "Where to?", SegmentParams)
+    return "unreachable"  # pragma: no cover
+
+
+@elicitation_server.tool(description="Ask for confirmation, as the calling user.")
+def confirm_as_user(request: HttpRequest) -> str:
+    answer = elicit(request, "Really do the thing?", Confirmation)
+    return f"{request.user} confirmed: {answer.confirmed}"

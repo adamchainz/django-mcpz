@@ -331,6 +331,69 @@ Callable permissions can check whatever the ``auth`` callable attached, such as 
 .. |request.user| replace:: ``request.user``
 __ https://docs.djangoproject.com/en/stable/ref/request-response/#django.http.HttpRequest.user
 
+.. _server-elicitation:
+
+Asking the user a question
+--------------------------
+
+A tool can ask the user for something mid-call with :func:`elicit`, such as a confirmation before a consequential action, or a detail the model did not supply.
+Describe what to collect as a ``msgspec.Struct``, and the answer comes back as an instance of it:
+
+.. code-block:: python
+
+    from typing import Annotated
+
+    import msgspec
+
+    from django_mcpz.server import ToolError, elicit
+
+
+    class Confirmation(msgspec.Struct):
+        confirmed: Annotated[bool, msgspec.Meta(description="Yes, issue it.")]
+
+
+    @server.tool(description="Issue a refund for an order.", destructive=True)
+    def issue_refund(request, params: IssueRefundParams) -> IssueRefundResult:
+        order = Order.objects.get(id=params.order_id)
+        confirmation = elicit(
+            request, f"Refund £{order.total} to {order.email}?", Confirmation
+        )
+        if not confirmation.confirmed:
+            raise ToolError("No refund issued.")
+        ...
+
+If the user declines, or the client cannot ask at all, :func:`elicit` raises :class:`ElicitationDeclinedError` or :class:`ElicitationUnavailableError`, which report the reason in-band unless the tool catches them.
+Form mode collects a flat object of primitive fields, so that any client can render it, and the schema is restricted to match.
+See :func:`elicit`.
+
+.. _server-elicitation-repeats:
+
+Repeated runs
+~~~~~~~~~~~~~
+
+MCP version 2026-07-28 gives the server no channel to send a question over.
+Instead the server *returns* the question, and the client answers it by repeating the whole tool call.
+A tool that asks therefore runs again from the top for each answer, so everything above an ``elicit()`` call runs more than once:
+
+.. code-block:: python
+
+    @server.tool(description="Refund an order.", destructive=True)
+    def refund(request, params: RefundParams) -> str:
+        order = Order.objects.get(id=params.order_id)  # runs twice
+        confirmation = elicit(request, "Refund it?", Confirmation)  # asks, then answers
+        order.refund()  # runs once
+        return "Refunded."
+
+Read freely before a question, and leave the writes until after the last one.
+Under |ATOMIC_REQUESTS|__ a write made before a question is rolled back when the question is asked; without it, the write is committed and the call carrying the answer makes it again.
+
+.. |ATOMIC_REQUESTS| replace:: ``ATOMIC_REQUESTS``
+__ https://docs.djangoproject.com/en/stable/ref/settings/#atomic-requests
+
+The answers already given travel in an opaque ``requestState`` that the client echoes back unread, as covered in :ref:`server-protocol-support`.
+It is bound to the caller it was issued to, which needs an ``auth`` callable that identifies one, see :ref:`server-security`.
+That binding does not make an answer single-use, so a client can repeat the call that carries it, and a tool whose action must happen at most once, such as a refund, should check it has not already happened.
+
 .. _server-logging:
 
 Logging tool calls

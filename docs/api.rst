@@ -207,6 +207,52 @@ Servers
 
     Any other exception raised by a tool is logged to the ``django_mcpz`` logger and reported in-band with a generic message, so internal details do not leak to clients.
 
+.. function:: elicit(request, message, schema, *, key=None)
+
+    Ask the user a question from inside a tool function, returning their answer.
+    See :ref:`server-elicitation`.
+
+    :param message:
+        The question, for the client to show the user.
+        The specification forbids asking for secrets, such as passwords, API keys, or payment credentials.
+
+    :param schema:
+        What to collect, in one of two forms:
+
+        * A msgspec-supported type, typically a `msgspec Struct <https://msgspec.dev/structs>`__, from which the schema is generated and which the answer is converted to and returned as.
+
+        * A JSON Schema as a plain ``dict``, sent as-is, whose answer is returned as a ``dict``, without validation, as for a ``dict`` ``input_schema``.
+
+        Form mode allows a flat object of primitive properties only, so that any client can render it: strings, numbers, integers, booleans, a ``Literal`` or ``Enum`` of strings, and a list of a ``Literal`` or ``Enum`` of strings as a multiple choice.
+        A field without a default is required, as for a tool's parameters.
+        A type with a nested object, a plain ``list[str]``, or an optional field typed ``| None`` rather than given a default, raises |ImproperlyConfigured|__.
+
+        __ https://docs.djangoproject.com/en/stable/ref/exceptions/#django.core.exceptions.ImproperlyConfigured
+
+    :param key:
+        The identifier this question is asked and answered under.
+        Defaults to the position of the call, as ``"elicitation-0"``, ``"elicitation-1"``, and so on.
+        Pass one where the questions a tool asks vary from run to run, since a position then names a different question each time.
+        Asking twice under one key, including a chosen key that matches another call’s position, raises |ImproperlyConfigured|__, since an answer would be given to both.
+
+        __ https://docs.djangoproject.com/en/stable/ref/exceptions/#django.core.exceptions.ImproperlyConfigured
+
+    .. warning::
+
+        A tool that reaches this runs again from the top for each answer, as covered in :ref:`server-elicitation-repeats`, so do the work that must happen once after the last question.
+        For the same reason, never catch this function’s internal control-flow exception: a bare ``except Exception`` around an ``elicit()`` call swallows the question and reports a failure instead of asking it.
+
+.. exception:: ElicitationDeclinedError
+
+    Raised by :func:`elicit` when the user declined or dismissed the question.
+    A subclass of :class:`ToolError`, so a tool that does not catch it reports the refusal in-band, and the model can offer the user something else.
+
+.. exception:: ElicitationUnavailableError
+
+    Raised by :func:`elicit` when the client cannot answer questions.
+    A subclass of :class:`ToolError`, so a tool that does not catch it tells the model the question could not be asked.
+    Catch it to fall back to a non-interactive path, such as refusing an action that needed confirmation.
+
 .. class:: Icon(static=None, path=None, mime_type=None, sizes=None, theme=None)
 
     An icon for a server or a tool, served by this site from Django’s `static files <https://docs.djangoproject.com/en/stable/howto/static-files/>`__ or a URL path, for the ``icons`` parameters of :class:`MCPServer` and :meth:`~MCPServer.tool`.
@@ -307,7 +353,7 @@ Records logged to the ``django_mcpz.calls`` logger, as covered in :ref:`server-l
        These are not in the message text, since they may contain sensitive data.
        Include them only in handlers that store data appropriately.
    * - ``outcome``
-     - One of ``"ok"``, ``"invalid_arguments"`` (rejected before the tool ran), ``"tool_error"`` (the tool raised :class:`ToolError`), or ``"exception"`` (the tool raised anything else, also logged with its traceback at ``ERROR`` level to the ``django_mcpz`` logger).
+     - One of ``"ok"``, ``"invalid_arguments"`` (rejected before the tool ran), ``"input_required"`` (the tool asked the user a question, as in :ref:`server-elicitation`), ``"tool_error"`` (the tool raised :class:`ToolError`), or ``"exception"`` (the tool raised anything else, also logged with its traceback at ``ERROR`` level to the ``django_mcpz`` logger).
    * - ``duration``
      - Seconds spent validating arguments and running the tool, as a float.
 
