@@ -2,6 +2,13 @@
 Changelog
 =========
 
+Unreleased
+----------
+
+* Add :func:`django_mcpz.orm.add_query_tool`, which registers a tool that runs read-only Django ORM queries written as Python by the calling model, against an allowlist of models.
+  Queries are interpreted from their syntax tree rather than executed, with every method and import checked against an allowlist, per-model view permissions, hidden fields, and a database-enforced timeout.
+  See :doc:`orm`.
+
 1.0.3 (2026-09-16)
 ------------------
 

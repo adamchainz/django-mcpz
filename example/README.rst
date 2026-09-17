@@ -15,7 +15,7 @@ The important code lives in these files:
 * ``pizzeria/views.py`` and ``pizzeria/templates/pizzeria/menu.html``: the menu web page that the ``menu_link`` tool points at.
 * ``pizzeria/static/pizzeria/icon.svg``: the server’s icon, which clients show alongside its title.
 
-The five tools are:
+The six tools are:
 
 * ``current_date``: today’s date and weekday, so an LLM can work out what relative dates like “tomorrow” mean.
 * ``search_menu``: the pizzas available on a date, with an optional name query and price limit, returning the notes for the model to read.
@@ -24,6 +24,7 @@ The five tools are:
 * ``orders_chart``: a pie chart of the pizzas ordered today, as a PNG image drawn with `Pillow <https://pypi.org/project/pillow/>`__, with the numbers behind it as text.
   The text is there so the model can answer from it in clients that do not show it images.
 * ``menu_link``: a link to the menu web page for a date, past or future, for the user to open in a browser.
+* ``query``: the `ORM query tool <https://django-mcpz.readthedocs.io/en/latest/orm.html>`__, which runs read-only ORM queries the model writes itself, for questions the other tools do not answer, such as “which pizza sells best on Fridays?”.
 
 Setup
 -----

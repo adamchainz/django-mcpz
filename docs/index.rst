@@ -9,6 +9,7 @@ django-mcpz documentation
 
    installation
    servers
+   orm
    oauth
    bearer_tokens
    api

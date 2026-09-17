@@ -9,6 +9,7 @@ from django.http import HttpRequest, HttpResponse
 
 from django_mcpz.bearer_tokens.auth import token_auth
 from django_mcpz.oauth.auth import oauth_auth
+from django_mcpz.orm import add_query_tool
 from django_mcpz.server import (
     Icon,
     Image,
@@ -332,6 +333,22 @@ def staff_tool(request: HttpRequest, arguments: dict[str, Any]) -> str:
 )
 def widget_tool(request: HttpRequest, arguments: dict[str, Any]) -> str:
     return "widgets"
+
+
+# The ORM query tool, for users identified by header as above.
+
+orm_server = MCPServer(
+    name="orm-server",
+    version="1.0.0",
+    auth=header_user_auth,
+)
+
+add_query_tool(
+    orm_server,
+    models=["tests", "auth.User", "auth.Group"],
+    hidden_fields=["tests.Supplier.secret_rate"],
+    docstrings=True,
+)
 
 
 # Authenticated with bearer tokens from the django_mcpz.bearer_tokens app.

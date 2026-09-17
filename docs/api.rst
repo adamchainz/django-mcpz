@@ -256,6 +256,67 @@ Servers
     An ``auth`` callable that allows every request, for a server without authentication.
     See :ref:`server-public`.
 
+.. _api-orm:
+
+ORM query tool
+--------------
+
+.. currentmodule:: django_mcpz.orm
+
+The query tool, as covered in :doc:`orm`.
+
+.. function:: add_query_tool(server, *, models, name="query", title=None, instructions=None, permission=None, model_permission=None, hidden_fields=(), using=None, timeout=30.0, max_rows=200, docstrings=False)
+
+    Register a tool on ``server`` that runs read-only ORM queries, written as Python by the calling model, against the given models.
+
+    :param server:
+        The :class:`~django_mcpz.server.MCPServer` to register the tool on.
+
+    :param models:
+        Required.
+        The models that may be queried, as an iterable of app labels like ``"shop"``, model labels like ``"shop.Order"``, and model classes.
+        Unknown entries, abstract models, and an empty list raise ``ImproperlyConfigured``.
+
+    :param name:
+        The tool name, ``"query"`` by default.
+
+    :param title:
+        Optional human-readable tool name for display purposes.
+
+    :param instructions:
+        Optional text appended to the tool’s description, for guidance specific to your data.
+
+    :param permission:
+        The tool-level authorization check, as for :meth:`~django_mcpz.server.MCPServer.tool`.
+        Defaults to hiding the tool from callers who may read none of the models, per ``model_permission``.
+
+    :param model_permission:
+        A callable taking the ``HttpRequest`` and a model class, returning whether the caller may read that model.
+        Defaults to checking the model’s ``view`` permission with |has_perm|__, which requires ``request.user``.
+
+        .. |has_perm| replace:: ``request.user.has_perm()``
+        __ https://docs.djangoproject.com/en/stable/ref/contrib/auth/#django.contrib.auth.models.User.has_perm
+
+    :param hidden_fields:
+        Fields that queries may not read, as ``"app_label.Model.field"`` strings.
+        The ``password`` field of user models is always hidden.
+        Unknown fields raise ``ImproperlyConfigured``.
+
+    :param using:
+        Optionally, the database alias to run every query on, overriding the database routers.
+        An unknown alias raises ``ImproperlyConfigured``.
+
+    :param timeout:
+        The query timeout in seconds, 30 by default, or ``None`` for no timeout.
+        See :ref:`orm-timeouts`.
+
+    :param max_rows:
+        The maximum number of rows returned from a query, 200 by default.
+
+    :param docstrings:
+        Whether to include model docstrings in the app listings.
+        Off by default.
+
 .. _api-schemas:
 
 Schema generation

@@ -12,6 +12,7 @@ from django.utils import timezone
 from PIL import Image as PILImage
 from PIL import ImageDraw, ImageFont
 
+from django_mcpz.orm import add_query_tool
 from django_mcpz.server import (
     Icon,
     Image,
@@ -260,3 +261,16 @@ def menu_link(request: HttpRequest, params: MenuLinkParams) -> ResourceLink:
         name=f"MCPizza menu for {on_date.isoformat()}",
         mime_type="text/html",
     )
+
+
+# A tool that runs read-only ORM queries the model writes itself, for
+# questions the tools above do not cover, such as "which pizza sells best on
+# Fridays?". Every model in the pizzeria app may be read. With no
+# authentication, there is no request.user to check permissions on, so
+# every caller may read every model.
+add_query_tool(
+    server,
+    models=["pizzeria"],
+    model_permission=lambda request, model: True,
+    instructions="Prices and totals are in pounds sterling.",
+)
