@@ -11,6 +11,8 @@ Unreleased
 * Point the OAuth challenge for an MCP server routed at the site root, with ``path("", server)``, at ``/.well-known/oauth-protected-resource`` rather than the same URL with a trailing slash, which was not served.
   Clients following the challenge received a 404 response and could not discover the authorization server.
 
+* Make ``mcpz bearer-tokens create`` reject a too-long name with a clear error, rather than crashing with a database error.
+
 1.0.3 (2026-09-16)
 ------------------
 
