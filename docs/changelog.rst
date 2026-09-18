@@ -13,6 +13,9 @@ Unreleased
 
 * Make ``mcpz bearer-tokens create`` reject a too-long name with a clear error, rather than crashing with a database error.
 
+* Name the error in the bearer tokens app’s 401 challenge when a credential was sent but rejected, as ``WWW-Authenticate: Bearer error="invalid_token"``, per RFC 6750, matching the OAuth app.
+  Requests carrying no bearer credential still receive the bare ``Bearer`` challenge.
+
 1.0.3 (2026-09-16)
 ------------------
 
