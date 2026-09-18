@@ -6,7 +6,7 @@ requires = [
 
 [project]
 name = "django-mcpz"
-version = "1.0.3"
+version = "1.0.4"
 description = "Easy peasy MCP servers in Django."
 readme = "README.rst"
 keywords = [
