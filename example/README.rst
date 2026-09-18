@@ -15,7 +15,7 @@ The important code lives in these files:
 * ``pizzeria/views.py`` and ``pizzeria/templates/pizzeria/menu.html``: the menu web page that the ``menu_link`` tool points at.
 * ``pizzeria/static/pizzeria/icon.svg``: the server’s icon, which clients show alongside its title.
 
-The five tools are:
+The seven tools are:
 
 * ``current_date``: today’s date and weekday, so an LLM can work out what relative dates like “tomorrow” mean.
 * ``search_menu``: the pizzas available on a date, with an optional name query and price limit, returning the notes for the model to read.
@@ -24,6 +24,12 @@ The five tools are:
 * ``orders_chart``: a pie chart of the pizzas ordered today, as a PNG image drawn with `Pillow <https://pypi.org/project/pillow/>`__, with the numbers behind it as text.
   The text is there so the model can answer from it in clients that do not show it images.
 * ``menu_link``: a link to the menu web page for a date, past or future, for the user to open in a browser.
+* ``add_to_menu``: add a pizza to the menu, asking the user for its price, whether it’s vegetarian, and any notes, with `elicitation <https://django-mcpz.readthedocs.io/en/latest/servers.html#asking-the-user-a-question>`__.
+* ``remove_from_menu``: take a pizza off the menu from tomorrow, once the user confirms, also with elicitation.
+  It’s retired rather than deleted, since orders refer to it.
+
+The last two need a client that supports form mode elicitation on the 2026-07-28 protocol, such as the Python SDK below.
+Other clients get an in-band error saying they can’t answer the question.
 
 Setup
 -----
@@ -227,8 +233,57 @@ The chart comes back as a ``TextContent`` and an ``ImageContent`` block, whose `
 
 .. code-block:: text
 
-    ['current_date', 'search_menu', 'place_order', 'orders_chart', 'menu_link']
+    ['current_date', 'search_menu', 'place_order', 'add_to_menu', 'remove_from_menu', 'orders_chart', 'menu_link']
     {'date': '2026-09-11', 'pizzas': [{'name': 'Garlic Bread (Technically a Pizza)', ...}, ...]}
     TextContent Pizzas ordered on 2026-09-11, 11 in total: Margherita of Theseus 5 (45%), Pepperoni Overflow 3 (27%), The Off-By-One 2 (18%), Null Pointer 1 (9%).
     ImageContent image/png
     http://127.0.0.1:8066/menu/2026-12-25/
+
+To answer the questions ``add_to_menu`` and ``remove_from_menu`` ask, pass the client an ``elicitation_callback``.
+This one prompts in the terminal, standing in for the accept and decline buttons a client would show:
+
+.. code-block:: python
+
+    import asyncio
+
+    from mcp.client.client import Client
+    from mcp_types import ElicitResult
+
+
+    async def answer(context, params):
+        print(params.message)
+        if input("Accept or decline? (a/d): ") != "a":
+            return ElicitResult(action="decline")
+        content = {}
+        for name, field in params.requested_schema["properties"].items():
+            value = input(f"{field['description']} ({field['type']}): ")
+            if field["type"] == "boolean":
+                content[name] = value.lower().startswith("y")
+            elif field["type"] == "number":
+                content[name] = float(value)
+            else:
+                content[name] = value
+        return ElicitResult(action="accept", content=content)
+
+
+    async def main():
+        async with Client(
+            "http://127.0.0.1:8066/mcp", elicitation_callback=answer
+        ) as client:
+            result = await client.call_tool(
+                "add_to_menu",
+                {
+                    "name": "Segfault Supreme",
+                    "description": "Tomato, mozzarella, chilli oil.",
+                },
+            )
+            print(result.structured_content or result.content[0].text)
+            result = await client.call_tool(
+                "remove_from_menu", {"pizza": "Segfault Supreme"}
+            )
+            print(result.structured_content or result.content[0].text)
+
+
+    asyncio.run(main())
+
+Each call runs twice: once to ask the question, then again, repeated by the client, with the answer.
