@@ -94,3 +94,9 @@ class DiscoveryTests(ParametrizedTestCase, SimpleTestCase):
             discovery.resource_metadata_url("https://example.com")
             == "https://example.com/.well-known/oauth-protected-resource"
         )
+        # A server at the site root: the document is served without a
+        # trailing slash, so the URL must not carry one.
+        assert (
+            discovery.resource_metadata_url("https://example.com/")
+            == "https://example.com/.well-known/oauth-protected-resource"
+        )

@@ -8,6 +8,9 @@ Unreleased
 * Compare the OAuth token endpoint’s ``resource`` parameter with the scheme and host lowercased, as the authorize endpoint does.
   Previously, a client sending a resource URL with an uppercase scheme or host, such as ``https://Example.com/mcp``, could obtain an authorization code but not exchange or refresh it, since the token endpoint compared the value as given against the stored lowercase form.
 
+* Point the OAuth challenge for an MCP server routed at the site root, with ``path("", server)``, at ``/.well-known/oauth-protected-resource`` rather than the same URL with a trailing slash, which was not served.
+  Clients following the challenge received a 404 response and could not discover the authorization server.
+
 1.0.3 (2026-09-16)
 ------------------
 
