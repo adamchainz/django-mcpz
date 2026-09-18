@@ -8,13 +8,21 @@ Unreleased
 * Compare the OAuth token endpoint’s ``resource`` parameter with the scheme and host lowercased, as the authorize endpoint does.
   Previously, a client sending a resource URL with an uppercase scheme or host, such as ``https://Example.com/mcp``, could obtain an authorization code but not exchange or refresh it, since the token endpoint compared the value as given against the stored lowercase form.
 
+  `PR #25 <https://github.com/adamchainz/django-mcpz/pull/25>`__.
+
 * Point the OAuth challenge for an MCP server routed at the site root, with ``path("", server)``, at ``/.well-known/oauth-protected-resource`` rather than the same URL with a trailing slash, which was not served.
   Clients following the challenge received a 404 response and could not discover the authorization server.
 
+  `PR #26 <https://github.com/adamchainz/django-mcpz/pull/26>`__.
+
 * Make ``mcpz bearer-tokens create`` reject a too-long name with a clear error, rather than crashing with a database error.
+
+  `PR #28 <https://github.com/adamchainz/django-mcpz/pull/28>`__.
 
 * Name the error in the bearer tokens app’s 401 challenge when a credential was sent but rejected, as ``WWW-Authenticate: Bearer error="invalid_token"``, per RFC 6750, matching the OAuth app.
   Requests carrying no bearer credential still receive the bare ``Bearer`` challenge.
+
+  `PR #29 <https://github.com/adamchainz/django-mcpz/pull/29>`__.
 
 1.0.3 (2026-09-16)
 ------------------
