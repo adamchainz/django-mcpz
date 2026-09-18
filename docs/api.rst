@@ -324,6 +324,7 @@ The ``django_mcpz.bearer_tokens`` app, as covered in :doc:`bearer_tokens`.
 
     Reject requests, with a 401 response, unless their ``Authorization`` header carries an unrevoked, unexpired bearer token, like ``Authorization: Bearer mcp_...``.
     Bearer tokens of inactive users, per |is_active|__, are rejected too, so deactivating a user cuts off their clients.
+    The 401 response’s ``WWW-Authenticate`` header names the error, as ``Bearer error="invalid_token"``, when a credential was sent but rejected, per RFC 6750.
 
     __ https://docs.djangoproject.com/en/stable/ref/contrib/auth/#django.contrib.auth.models.User.is_active
 
