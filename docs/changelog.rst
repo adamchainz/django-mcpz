@@ -2,6 +2,12 @@
 Changelog
 =========
 
+Unreleased
+----------
+
+* Compare the OAuth token endpoint’s ``resource`` parameter with the scheme and host lowercased, as the authorize endpoint does.
+  Previously, a client sending a resource URL with an uppercase scheme or host, such as ``https://Example.com/mcp``, could obtain an authorization code but not exchange or refresh it, since the token endpoint compared the value as given against the stored lowercase form.
+
 1.0.3 (2026-09-16)
 ------------------
 
