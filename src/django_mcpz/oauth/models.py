@@ -70,7 +70,7 @@ class Client(models.Model):
         Client.objects.filter(pk=self.pk).update(last_used_at=timezone.now())
 
 
-LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1"})
+LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
 def _loopback_match(uri: str, registered: str) -> bool:
