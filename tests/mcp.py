@@ -424,6 +424,15 @@ def order_dessert(request: HttpRequest) -> dict[str, Any]:
     }
 
 
+@elicitation_server.tool(description="Ask inside a broad exception handler.")
+def confirm_catching(request: HttpRequest) -> str:
+    try:
+        answer = elicit(request, "Really do the thing?", Confirmation)
+    except Exception:  # pragma: no cover
+        return "Swallowed."
+    return f"Confirmed: {answer.confirmed}"
+
+
 @elicitation_server.tool(description="Ask with a plain schema, under a fixed key.")
 def ask_name(request: HttpRequest) -> str:
     answer = elicit(

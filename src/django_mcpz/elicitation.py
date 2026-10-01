@@ -63,9 +63,12 @@ class BadStateError(Exception):
     """An untrustworthy requestState, or an unparsable inputResponses."""
 
 
-class InputRequired(Exception):
+class InputRequired(BaseException):
     """
     An elicit() call with no answer yet, carrying the request to ask for one.
+
+    A BaseException, like KeyboardInterrupt, since it is control flow rather
+    than an error, so a tool's ``except Exception`` cannot swallow it.
     """
 
     def __init__(

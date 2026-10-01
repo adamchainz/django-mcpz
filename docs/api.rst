@@ -240,7 +240,7 @@ Servers
     .. warning::
 
         A tool that reaches this runs again from the top for each answer, as covered in :ref:`server-elicitation-repeats`, so do the work that must happen once after the last question.
-        For the same reason, never catch this function’s internal control-flow exception: a bare ``except Exception`` around an ``elicit()`` call swallows the question and reports a failure instead of asking it.
+        To ask, it raises an internal control-flow exception that subclasses ``BaseException``, like ``KeyboardInterrupt``, so ``except Exception`` does not catch it, but a bare ``except:`` or ``except BaseException`` swallows the question.
 
 .. exception:: ElicitationDeclinedError
 

@@ -158,6 +158,14 @@ class AskingTests(ElicitationTestCase, ParametrizedTestCase):
             "properties": {"confirmed": {"type": "boolean", "default": False}},
         }
 
+    def test_not_swallowed_by_except_exception(self):
+        asked = self.assert_asked(self.call("confirm_catching"))
+
+        response = self.answer("confirm_catching", asked, {"confirmed": True})
+
+        result = self.assert_completed(response)
+        assert result["content"] == [{"type": "text", "text": "Confirmed: True"}]
+
     def test_server_info_on_the_question(self):
         response = self.call("confirm")
 
