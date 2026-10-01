@@ -424,6 +424,20 @@ def order_dessert(request: HttpRequest) -> dict[str, Any]:
     }
 
 
+@elicitation_server.tool(description="Ask, with a custom note on expiry.")
+def confirm_custom_expiry(request: HttpRequest) -> str:
+    answer = elicit(
+        request, "Really do the thing?", Confirmation, expired_message="Too slow!"
+    )
+    return f"Confirmed: {answer.confirmed}"
+
+
+@elicitation_server.tool(description="Ask, with no note on expiry.")
+def confirm_no_expiry_note(request: HttpRequest) -> str:
+    answer = elicit(request, "Really do the thing?", Confirmation, expired_message=None)
+    return f"Confirmed: {answer.confirmed}"
+
+
 @elicitation_server.tool(description="Ask inside a broad exception handler.")
 def confirm_catching(request: HttpRequest) -> str:
     try:

@@ -92,6 +92,7 @@ class Elicitation:
     arguments: dict[str, Any]
     answers: dict[str, Answer] = field(default_factory=dict)
     unavailable: str | None = None
+    expired: bool = False
     issued: list[str] = field(default_factory=list)
 
     @classmethod
@@ -113,6 +114,10 @@ class Elicitation:
         taken from inputResponses, so a client cannot answer a question before
         it is asked. Raise BadStateError for a requestState that fails
         verification, or an unparsable answer to the pending question.
+
+        An expired requestState is not an error, since a person may simply
+        have taken a while to answer. Its answers are dropped, and the call
+        runs as though new, so the tool asks again, marked as expired.
         """
         elicitation = cls(
             server=server,
@@ -124,6 +129,9 @@ class Elicitation:
         if request_state is None:
             return elicitation
         state = elicitation._verified_state(request_state)
+        if state is None:
+            elicitation.expired = True
+            return elicitation
         elicitation.answers.update(state.answers)
         answer = _pending_answer(input_responses, state.pending)
         if answer is not None:
@@ -162,13 +170,14 @@ class Elicitation:
         )
         return signing.dumps(state, salt=self.salt, serializer=StateSerializer)
 
-    def _verified_state(self, value: object) -> State:
+    def _verified_state(self, value: object) -> State | None:
         """
         A requestState, once its signature is checked and it proves to belong
-        to this call, by this caller.
+        to this call, by this caller, or None if it has expired.
         """
         if not isinstance(value, str):
             raise BadStateError("requestState must be a string")
+        expired = False
         try:
             state: State = signing.loads(
                 value,
@@ -176,11 +185,18 @@ class Elicitation:
                 serializer=StateSerializer,
                 max_age=STATE_MAX_AGE,
             )
+        except signing.SignatureExpired:
+            # Raised only once the signature checks out, so the state is
+            # genuine, and still checked as belonging to this call below.
+            expired = True
+            state = signing.loads(value, salt=self.salt, serializer=StateSerializer)
         except signing.BadSignature:
             raise BadStateError("Invalid requestState") from None
         issued_for = (state.principal, state.tool, state.arguments)
         if issued_for != (self.principal, self.tool, digest(self.arguments)):
             raise BadStateError("Invalid requestState")
+        if expired:
+            return None
         return state
 
 

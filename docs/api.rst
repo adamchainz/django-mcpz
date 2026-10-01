@@ -207,7 +207,7 @@ Servers
 
     Any other exception raised by a tool is logged to the ``django_mcpz`` logger and reported in-band with a generic message, so internal details do not leak to clients.
 
-.. function:: elicit(request, message, schema, *, key=None)
+.. function:: elicit(request, message, schema, *, key=None, expired_message='Your earlier answer expired, so this is asked again.')
 
     Ask the user a question from inside a tool function, returning their answer.
     See :ref:`server-elicitation`.
@@ -236,6 +236,11 @@ Servers
         Asking twice under one key, including a chosen key that matches another call’s position, raises |ImproperlyConfigured|__, since an answer would be given to both.
 
         __ https://docs.djangoproject.com/en/stable/ref/exceptions/#django.core.exceptions.ImproperlyConfigured
+
+    :param expired_message:
+        A note shown above the question when it is asked again because the user took too long to answer.
+        Answers expire ten minutes after their question is asked, and then the tool runs again from the top with no answers.
+        Pass ``None`` to ask again without a note.
 
     .. warning::
 

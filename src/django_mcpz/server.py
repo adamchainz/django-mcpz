@@ -94,6 +94,8 @@ class ElicitationDeclinedError(ToolError):
 
 StructT = TypeVar("StructT", bound=msgspec.Struct)
 
+EXPIRED_MESSAGE = "Your earlier answer expired, so this is asked again."
+
 _NO_ELICITATION = (
     "This tool needs to ask you a question, which this client does not"
     " support (form mode MCP elicitation)."
@@ -111,6 +113,7 @@ def elicit(
     schema: type[StructT],
     *,
     key: str | None = None,
+    expired_message: str | None = EXPIRED_MESSAGE,
 ) -> StructT: ...
 
 
@@ -121,6 +124,7 @@ def elicit(
     schema: dict[str, Any],
     *,
     key: str | None = None,
+    expired_message: str | None = EXPIRED_MESSAGE,
 ) -> dict[str, Any]: ...
 
 
@@ -130,6 +134,7 @@ def elicit(
     schema: type[StructT] | dict[str, Any],
     *,
     key: str | None = None,
+    expired_message: str | None = EXPIRED_MESSAGE,
 ) -> StructT | dict[str, Any]:
     """
     Ask the user a question from inside a tool function, returning the answer.
@@ -139,6 +144,10 @@ def elicit(
     answers by calling the tool again. This call then returns the answer and
     the tool carries on, which means everything above it runs once per
     question, and a tool must not depend on running only once.
+
+    When the user took too long to answer, the answers so far are dropped and
+    the question asked again, with expired_message shown above it, unless it
+    is None.
     """
     elicitation = getattr(request, "mcp_elicitation", None)
     if elicitation is None:
@@ -151,6 +160,8 @@ def elicit(
     key = elicitation.claim_key(key)
     answer = elicitation.answers.get(key)
     if answer is None:
+        if elicitation.expired and expired_message is not None:
+            message = f"{expired_message}\n\n{message}"
         raise InputRequired(key, message, _requested_schema(schema))
     if answer.action != "accept":
         wording = "declined" if answer.action == "decline" else "dismissed"

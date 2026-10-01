@@ -459,13 +459,64 @@ class RequestStateTests(ElicitationTestCase, ParametrizedTestCase):
 
         self.assert_error(response, INVALID_PARAMS)
 
-    def test_expired(self):
-        state = self.state()
+    def call_expired(self, name: str, **overrides: Any) -> Any:
+        """Call with a genuine state, an hour after it was issued."""
+        state = self.state(tool=name, **overrides)
+        with mock.patch.object(time, "time", return_value=time.time() + 3600):
+            return self.call(
+                name,
+                request_state=state,
+                answers={"elicitation-0": {"action": "accept"}},
+            )
+
+    def test_expired_asked_again(self):
+        asked = self.assert_asked(self.call_expired("confirm"))
+
+        params = asked["inputRequests"]["elicitation-0"]["params"]
+        assert params["message"] == (
+            "Your earlier answer expired, so this is asked again.\n\n"
+            "Really do the thing?"
+        )
+
+    def test_expired_then_answered(self):
+        asked = self.assert_asked(self.call_expired("confirm"))
+
+        response = self.answer("confirm", asked, {"confirmed": True})
+
+        result = self.assert_completed(response)
+        assert result["content"] == [{"type": "text", "text": "Confirmed: True"}]
+
+    @parametrize(
+        "name,message",
+        [
+            param(
+                "confirm_custom_expiry",
+                "Too slow!\n\nReally do the thing?",
+                id="custom",
+            ),
+            param("confirm_no_expiry_note", "Really do the thing?", id="none"),
+        ],
+    )
+    def test_expired_message(self, name, message):
+        asked = self.assert_asked(self.call_expired(name))
+
+        params = asked["inputRequests"]["elicitation-0"]["params"]
+        assert params["message"] == message
+
+    def test_expired_issued_for_something_else(self):
+        response = self.call_expired("confirm", principal="user:1:client:1")
+
+        error = self.assert_error(response, INVALID_PARAMS)
+        assert error["message"] == "Invalid requestState"
+
+    def test_expired_tampered(self):
+        state = self.state() + "x"
 
         with mock.patch.object(time, "time", return_value=time.time() + 3600):
             response = self.call("confirm", request_state=state)
 
-        self.assert_error(response, INVALID_PARAMS)
+        error = self.assert_error(response, INVALID_PARAMS)
+        assert error["message"] == "Invalid requestState"
 
     def test_another_servers_state(self):
         state = signing.dumps(

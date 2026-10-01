@@ -392,6 +392,7 @@ __ https://docs.djangoproject.com/en/stable/ref/settings/#atomic-requests
 
 The answers already given travel in an opaque ``requestState`` that the client echoes back unread, as covered in :ref:`server-protocol-support`.
 It is bound to the caller it was issued to, which needs an ``auth`` callable that identifies one, see :ref:`server-security`.
+Answers expire ten minutes after their question is asked, after which the tool asks again, as covered under :func:`elicit`.
 That binding does not make an answer single-use, so a client can repeat the call that carries it, and a tool whose action must happen at most once, such as a refund, should check it has not already happened.
 
 .. _server-logging:
