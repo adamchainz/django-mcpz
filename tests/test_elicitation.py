@@ -212,6 +212,22 @@ class AskingTests(ElicitationTestCase, ParametrizedTestCase):
             }
         ]
 
+    def test_refusal_not_a_tool_error(self):
+        asked = self.assert_asked(self.call("confirm_catching_tool_error"))
+
+        response = self.answer(
+            "confirm_catching_tool_error", asked, None, action="decline"
+        )
+
+        result = self.assert_completed(response)
+        assert result["isError"] is True
+        assert result["content"] == [
+            {
+                "type": "text",
+                "text": "The user declined the question: Really do the thing?",
+            }
+        ]
+
     def test_invalid_answer_asked_again(self):
         # The specification asks servers to ask again, rather than error.
         asked = self.assert_asked(self.call("confirm"))

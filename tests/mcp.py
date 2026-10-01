@@ -438,6 +438,15 @@ def confirm_no_expiry_note(request: HttpRequest) -> str:
     return f"Confirmed: {answer.confirmed}"
 
 
+@elicitation_server.tool(description="Ask inside a ToolError handler.")
+def confirm_catching_tool_error(request: HttpRequest) -> str:
+    try:
+        answer = elicit(request, "Really do the thing?", Confirmation)
+    except ToolError:  # pragma: no cover
+        return "Caught."
+    return f"Confirmed: {answer.confirmed}"
+
+
 @elicitation_server.tool(description="Ask inside a broad exception handler.")
 def confirm_catching(request: HttpRequest) -> str:
     try:

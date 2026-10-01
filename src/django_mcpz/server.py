@@ -73,20 +73,27 @@ _CACHE_FIELDS = {"ttlMs": 300_000, "cacheScope": "private"}
 TOOL_NAME_RE = re.compile(r"[A-Za-z0-9_.-]{1,128}")
 
 
-class ToolError(Exception):
+class BaseToolError(Exception):
+    """
+    The base of the exceptions reported in-band, as a tool execution error
+    carrying the exception's message, rather than as a failure.
+    """
+
+
+class ToolError(BaseToolError):
     """
     Raise in a tool function to report a tool execution error in-band, so the
     calling language model can see the message and self-correct.
     """
 
 
-class ElicitationUnavailableError(ToolError):
+class ElicitationUnavailableError(BaseToolError):
     """
     Raised by elicit() when the client cannot answer questions from a tool.
     """
 
 
-class ElicitationDeclinedError(ToolError):
+class ElicitationDeclinedError(BaseToolError):
     """
     Raised by elicit() when the user declined or dismissed the question.
     """
@@ -921,7 +928,7 @@ class MCPServer:
                 self._input_required(request, request_id, elicitation, exc),
                 "input_required",
             )
-        except ToolError as exc:
+        except BaseToolError as exc:
             return self._tool_error(request, request_id, str(exc)), "tool_error"
         except Exception:
             logger.exception("Tool %r raised an exception", tool.name)

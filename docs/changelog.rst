@@ -7,6 +7,7 @@ Unreleased
 
 * Add form mode elicitation, so a tool can ask the user a question mid-call with the new ``elicit()`` function, such as a confirmation before a consequential action.
   The new ``ElicitationDeclinedError`` and ``ElicitationUnavailableError`` exceptions report a refusal, and the call log gains an ``"input_required"`` outcome.
+  They share the new base class ``BaseToolError`` with ``ToolError``, for exceptions reported in-band.
   Clients on the 2025 versions cannot answer questions, since those versions have no way to carry one.
 
   `PR #24 <https://github.com/adamchainz/django-mcpz/pull/24>`__.
