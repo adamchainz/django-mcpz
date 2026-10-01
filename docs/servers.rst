@@ -75,6 +75,11 @@ Route the server in ``urls.py``:
         path("mcp", server),
     ]
 
+.. tip::
+
+    Avoid a trailing slash in your MCP server’s URL, routing it with ``path("mcp", server)`` rather than ``path("mcp/", server)``.
+    Some clients strip the trailing slash from configured server URLs, such as the Claude desktop app, so requests to a server at ``/mcp/`` arrive at ``/mcp`` and fail.
+
 Every server needs an ``auth`` argument saying how callers are authenticated.
 The example uses the optional ``django_mcpz.bearer_tokens`` app, which authenticates clients with per-client bearer tokens.
 See :ref:`server-authentication`.
