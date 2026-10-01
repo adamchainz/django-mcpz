@@ -5,7 +5,7 @@ Changelog
 Unreleased
 ----------
 
-* Treat ``localhost`` as a loopback host for OAuth redirect URIs, as ``127.0.0.1`` and ``::1`` already were.
+* Treat ``localhost`` as a loopback host for OAuth redirect URIs, like ``127.0.0.1`` and ``::1`` already were.
   Previously, clients that register a ``localhost`` redirect URI, such as Claude Code with ``http://localhost/callback``, failed with “Unregistered redirect_uri.” and could not sign in.
 
   `PR #31 <https://github.com/adamchainz/django-mcpz/pull/31>`__.
