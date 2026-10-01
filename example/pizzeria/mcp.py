@@ -232,13 +232,16 @@ def remove_from_menu(
         raise ToolError(
             f"No pizza named {params.pizza!r}. Use search_menu to find exact names."
         ) from None
+    today = dt.date.today()
+    if pizza.available_until is not None and pizza.available_until <= today:
+        raise ToolError(f"{pizza.name} is already off the menu from tomorrow.")
     confirmation = elicit(
         request, f"Take {pizza.name} off the menu from tomorrow?", Confirmation
     )
     if not confirmation.confirmed:
         raise ToolError(f"{pizza.name} stays on the menu.")
     # Retired rather than deleted, since orders protect the pizza they are for.
-    pizza.available_until = dt.date.today()
+    pizza.available_until = today
     pizza.save(update_fields=["available_until"])
     return _pizza_json(pizza)
 
