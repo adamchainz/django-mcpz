@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import datetime as dt
 import io
-from decimal import ROUND_HALF_UP, Decimal
 from typing import Annotated, Any
 
 import msgspec
@@ -39,9 +38,9 @@ server = MCPServer(
         " search_menu with on_date to see what is on the menu for a given"
         " day. Read each pizza's notes for dietary options and requests the"
         " kitchen will honour. Order with place_order, using exact pizza"
-        " names, and put any requests in the requests field. Staff can change"
-        " the menu with add_to_menu and remove_from_menu, which ask the user"
-        " to fill in or confirm the details."
+        " names, and put any requests in the requests field. If the user"
+        " is unsure what to have, recommend_pizza asks them about their budget"
+        " and diet and suggests one."
     ),
     # Served on localhost only, so this example skips authentication. See
     # the docs for adding a bearer token or other auth.
@@ -159,91 +158,37 @@ def place_order(request: HttpRequest, params: PlaceOrderParams) -> dict[str, Any
     }
 
 
-class AddToMenuParams(msgspec.Struct):
-    name: Annotated[str, msgspec.Meta(description="The new pizza's name.")]
-    description: Annotated[
-        str,
-        msgspec.Meta(description="The toppings, as the menu should describe them."),
+class Preferences(msgspec.Struct):
+    max_price: Annotated[
+        float, msgspec.Meta(description="Most you want to spend, in pounds.", ge=0.0)
     ]
-
-
-class NewPizzaDetails(msgspec.Struct):
-    price: Annotated[float, msgspec.Meta(description="Price in pounds.", ge=0.0)]
-    vegetarian: Annotated[bool, msgspec.Meta(description="Suitable for vegetarians.")]
-    notes: Annotated[
-        str,
-        msgspec.Meta(
-            description="Dietary options, requests the kitchen will honour, or warnings."
-        ),
-    ] = ""
+    vegetarian: Annotated[bool, msgspec.Meta(description="Vegetarian pizzas only?")] = (
+        False
+    )
 
 
 @server.tool(
     description=(
-        "Add a pizza to the menu from today. The user is asked for its price,"
-        " whether it is vegetarian, and any notes."
-    )
-)
-def add_to_menu(request: HttpRequest, params: AddToMenuParams) -> dict[str, Any]:
-    if Pizza.objects.filter(name=params.name).exists():
-        raise ToolError(f"{params.name} is already on the menu.")
-    details = elicit(
-        request,
-        f"Add {params.name} to the menu? Fill in its details, or decline to cancel.",
-        NewPizzaDetails,
-    )
-    pizza = Pizza.objects.create(
-        name=params.name,
-        description=params.description,
-        price=Decimal(str(details.price)).quantize(
-            Decimal("0.01"), rounding=ROUND_HALF_UP
-        ),
-        vegetarian=details.vegetarian,
-        notes=details.notes,
-        available_from=dt.date.today(),
-    )
-    return _pizza_json(pizza)
-
-
-class RemoveFromMenuParams(msgspec.Struct):
-    pizza: Annotated[
-        str,
-        msgspec.Meta(description="Exact pizza name, as returned by search_menu."),
-    ]
-
-
-class Confirmation(msgspec.Struct):
-    confirmed: Annotated[bool, msgspec.Meta(description="Yes, take it off the menu.")]
-
-
-@server.tool(
-    description=(
-        "Take a pizza off the menu from tomorrow, after the user confirms."
-        " Today's orders are unaffected."
+        "Recommend a pizza from today's menu: the most ordered one that fits"
+        " the user's budget and diet, which they are asked for."
     ),
-    destructive=True,
+    read_only=True,
 )
-def remove_from_menu(
-    request: HttpRequest, params: RemoveFromMenuParams
-) -> dict[str, Any]:
-    try:
-        pizza = Pizza.objects.get(name=params.pizza)
-    except Pizza.DoesNotExist:
-        raise ToolError(
-            f"No pizza named {params.pizza!r}. Use search_menu to find exact names."
-        ) from None
-    today = dt.date.today()
-    if pizza.available_until is not None and pizza.available_until <= today:
-        raise ToolError(f"{pizza.name} is already off the menu from tomorrow.")
-    confirmation = elicit(
-        request, f"Take {pizza.name} off the menu from tomorrow?", Confirmation
+def recommend_pizza(request: HttpRequest) -> dict[str, Any]:
+    preferences = elicit(
+        request, "What are you after? We'll pick today's favourite.", Preferences
     )
-    if not confirmation.confirmed:
-        raise ToolError(f"{pizza.name} stays on the menu.")
-    # Retired rather than deleted, since orders protect the pizza they are for.
-    pizza.available_until = today
-    pizza.save(update_fields=["available_until"])
-    return _pizza_json(pizza)
+    pizzas = Pizza.objects.filter(price__lte=preferences.max_price)
+    if preferences.vegetarian:
+        pizzas = pizzas.filter(vegetarian=True)
+    pizzas = pizzas.annotate(ordered=Sum("order__quantity", default=0)).order_by(
+        "-ordered", "price"
+    )
+    today = dt.date.today()
+    for pizza in pizzas:
+        if pizza.available_on(today):
+            return {**_pizza_json(pizza), "times_ordered": pizza.ordered}
+    raise ToolError("Nothing on today's menu fits those preferences.")
 
 
 # A categorical palette in a fixed order, checked for colour-blind readers:
