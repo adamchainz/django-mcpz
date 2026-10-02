@@ -43,7 +43,7 @@ FORM: dict[str, Any] = {"elicitation": {"form": {}}}
 
 SALT = f"{STATE_SALT}:elicitation-server"
 
-ISSUED = dt.datetime(2026, 10, 1, 12, 0, tzinfo=dt.timezone.utc)
+ISSUED = dt.datetime(2026, 10, 1, 12, 0, tzinfo=dt.UTC)
 
 
 def time_travel(seconds: int) -> time_machine.travel:

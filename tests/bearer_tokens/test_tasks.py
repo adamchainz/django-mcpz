@@ -22,7 +22,7 @@ class TasksTests(TestCase):
         Token.create(
             name="expired",
             user=user,
-            expires_at=dt.datetime.min.replace(tzinfo=dt.timezone.utc),
+            expires_at=dt.datetime.min.replace(tzinfo=dt.UTC),
         )
 
         result = tasks.clear_expired.enqueue()
