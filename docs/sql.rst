@@ -13,42 +13,87 @@ This works with PostgreSQL only, through `psycopg 3 <https://www.psycopg.org/psy
 
 Never give the model your application’s database role.
 The model writes the SQL, and the SQL may come from whoever it is talking to, and whatever text it has read, so treat it as untrusted.
-The tools are designed for a dedicated PostgreSQL role that can read a chosen set of views and nothing else.
+The tools are designed for a dedicated PostgreSQL role that can read chosen tables, views, and columns, and nothing else.
 
 Setup
 -----
 
-The setup takes five steps: views, models for them, a role, a database alias, and the tools.
+The setup takes four steps: models describing what to expose, a database alias for the role, a ``post_migrate`` handler that maintains the role, and the tools.
 
-1. Create PostgreSQL views exposing exactly the rows and columns the model should see, such as in a migration with |RunSQL|__.
-   Views run with the privileges of their owner, so the role that queries them needs no access to the tables behind them.
-   They’re also a stable interface, which the model can learn, decoupled from your tables.
+1. Choose what to expose, as a list of models.
+   Each model’s table, and only the columns of its fields, become readable:
+
+   * **A whole table:** use your existing model.
+     Every column of its table is exposed.
+
+   * **Some columns of a table:** define an unmanaged model with the same ``db_table`` and only the fields to expose.
+     Columns without a field stay unreadable, such as ``requests`` here:
+
+     .. code-block:: python
+
+         class OrderSummary(models.Model):
+             """
+             One row per order, without the customer’s requests.
+             """
+
+             id = models.BigIntegerField(primary_key=True)
+             pizza = models.ForeignKey(Pizza, on_delete=models.DO_NOTHING)
+             quantity = models.PositiveSmallIntegerField()
+             placed_at = models.DateTimeField()
+
+             class Meta:
+                 managed = False
+                 db_table = "pizzeria_order"
+
+   * **Some rows, or derived columns:** create a view, such as in a migration with |RunSQL|__, and define an unmanaged model for it.
+     Views run with the privileges of their owner, so the role needs no access to the tables behind them.
+     They also make a stable interface, which the model can learn, decoupled from your tables.
+     For example, the example project exposes whether each order has requests, but not their text:
+
+     .. code-block:: python
+
+         migrations.RunSQL(
+             """
+             CREATE VIEW pizzeria_report_order_line AS
+             SELECT
+                 id,
+                 pizza_id,
+                 quantity,
+                 total,
+                 placed_at,
+                 requests <> '' AS has_requests,
+                 channel
+             FROM pizzeria_order
+             """,
+             "DROP VIEW pizzeria_report_order_line",
+         )
+
+     .. code-block:: python
+
+         class OrderLine(models.Model):
+             """
+             One row per order. The customer’s free-text requests are not exposed,
+             only whether there were any.
+             """
+
+             id = models.BigIntegerField(primary_key=True)
+             pizza = models.ForeignKey(MenuItem, on_delete=models.DO_NOTHING)
+             quantity = models.PositiveSmallIntegerField()
+             total = models.DecimalField(
+                 max_digits=7,
+                 decimal_places=2,
+                 help_text="Price paid for the whole order, in pounds.",
+             )
+             ...
+
+             class Meta:
+                 managed = False
+                 db_table = "pizzeria_report_order_line"
 
    .. |RunSQL| replace:: ``RunSQL``
    __ https://docs.djangoproject.com/en/stable/ref/migration-operations/#runsql
 
-   For example, the example project exposes orders without the customer’s free-text requests:
-
-   .. code-block:: python
-
-       migrations.RunSQL(
-           """
-           CREATE VIEW pizzeria_report_order_line AS
-           SELECT
-               id,
-               pizza_id,
-               quantity,
-               total,
-               placed_at,
-               requests <> '' AS has_requests,
-               channel
-           FROM pizzeria_order
-           """,
-           "DROP VIEW pizzeria_report_order_line",
-       )
-
-2. Define an unmanaged model for each view, so Django never tries to create or alter it.
-   The models drive the ``sql_schema`` tool, so document them for the model reading it:
+   The models also drive the ``sql_schema`` tool, so document them for the model reading it:
 
    * The model’s docstring, or its |db_table_comment|__, describes the table.
    * Each field’s |db_comment|__, or its ``help_text``, describes the column, as does its verbose name when it’s not just the field name with spaces.
@@ -61,42 +106,7 @@ The setup takes five steps: views, models for them, a role, a database alias, an
    .. |db_comment| replace:: ``db_comment``
    __ https://docs.djangoproject.com/en/stable/ref/models/fields/#db-comment
 
-   .. code-block:: python
-
-       class OrderLine(models.Model):
-           """
-           One row per order. The customer’s free-text requests are not exposed,
-           only whether there were any.
-           """
-
-           id = models.BigIntegerField(primary_key=True)
-           pizza = models.ForeignKey(MenuItem, on_delete=models.DO_NOTHING)
-           quantity = models.PositiveSmallIntegerField()
-           total = models.DecimalField(
-               max_digits=7,
-               decimal_places=2,
-               help_text="Price paid for the whole order, in pounds.",
-           )
-           ...
-
-           class Meta:
-               managed = False
-               db_table = "pizzeria_report_order_line"
-
-3. Create a role that can log in and read the views, and nothing more:
-
-   .. code-block:: sql
-
-       CREATE ROLE mcp_reader LOGIN PASSWORD '...';
-       GRANT CONNECT ON DATABASE app TO mcp_reader;
-       GRANT USAGE ON SCHEMA public TO mcp_reader;
-       GRANT SELECT ON pizzeria_report_menu_item, pizzeria_report_order_line TO mcp_reader;
-
-   Don’t make it a member of any other role, which it could switch to with ``SET ROLE``, and don’t grant it anything on ``PUBLIC`` beyond PostgreSQL’s defaults.
-   Each query checks that the login role isn’t a superuser, can’t bypass row-level security, and isn’t a member of other roles, failing with ``ImproperlyConfigured`` otherwise.
-   Remember to grant ``SELECT`` on new views as you add them, such as in the migrations that create them.
-
-4. Add a database alias that connects as the role:
+2. Add a database alias that connects as the role, which the next step creates:
 
    .. code-block:: python
 
@@ -117,15 +127,57 @@ The setup takes five steps: views, models for them, a role, a database alias, an
            },
        }
 
-   The alias must log in as the role.
+   The alias must log in as its own role.
    Django’s ``assume_role`` option won’t do, since queries could switch back to the login role, so :func:`add_sql_tools` rejects it.
-
-   In tests, the mirrored alias is still a separate connection, which sees only committed data, so test the tools with ``TransactionTestCase`` rather than ``TestCase``.
-   The role also needs its grants on the test database, which granting in migrations takes care of.
 
    If you use a `database router <https://docs.djangoproject.com/en/stable/topics/db/multi-db/#database-routers>`__, make sure it doesn’t send migrations to this alias.
 
-5. Add the tools to your server:
+3. Maintain the role’s grants with :func:`sync_sql_grants`, from a |post_migrate|__ handler, so they follow your models as they change:
+
+   .. |post_migrate| replace:: ``post_migrate``
+   __ https://docs.djangoproject.com/en/stable/ref/signals/#post-migrate
+
+   .. code-block:: python
+
+       from django.apps import AppConfig
+       from django.db.models.signals import post_migrate
+
+
+       class ExampleConfig(AppConfig):
+           name = "example"
+
+           def ready(self):
+               post_migrate.connect(sync_mcp_reader, sender=self)
+
+
+       def sync_mcp_reader(using, **kwargs):
+           from django_mcpz.sql import sync_sql_grants
+           from example.models import MenuItem, OrderLine
+
+           if using == "default":
+               sync_sql_grants(
+                   models=[MenuItem, OrderLine],
+                   reader="mcp_reader",
+                   using=using,
+               )
+
+   After every ``migrate``, this:
+
+   * creates the role if it doesn’t exist, with the alias’s ``PASSWORD``;
+   * grants it ``CONNECT`` on the database and ``USAGE`` on the tables’ schemas;
+   * revokes everything previously granted to it on tables and columns, then grants ``SELECT`` on exactly the columns of the models’ fields.
+
+   It all happens in one transaction, so the role never sees a half-way state.
+   The ``default`` connection’s role needs permission to create roles, or create the role yourself beforehand, and must own the tables, or be able to grant on them.
+   It also runs when the test runner creates the test database, so the role has its grants there too.
+
+   Use the same list of models here and for the tools.
+   With column-level grants, ``SELECT *`` on a table with unexposed columns fails with “permission denied”, but the schema lists only the exposed columns, so models name them instead.
+
+   Don’t make the role a member of any other role, which it could switch to with ``SET ROLE``.
+   Each query checks that the login role isn’t a superuser, can’t bypass row-level security, and isn’t a member of other roles, failing with ``ImproperlyConfigured`` otherwise.
+
+4. Add the tools to your server:
 
    .. code-block:: python
 
@@ -139,8 +191,10 @@ The setup takes five steps: views, models for them, a role, a database alias, an
            context="MCPizza's sales data. Prices and totals are in pounds (GBP).",
        )
 
-   ``context`` is optional text at the top of the schema, for anything that applies across tables.
+   ``context`` is optional text at the top of the table list, for anything that applies across tables.
    See :func:`add_sql_tools` for the other options.
+
+In tests, the mirrored alias is still a separate connection, which sees only committed data, so test the tools with ``TransactionTestCase`` rather than ``TestCase``.
 
 What the model sees
 -------------------
@@ -177,7 +231,7 @@ The model then calls it again with the tables it needs, such as ``{"tables": ["p
 
 So the table descriptions are the model’s guide to which tables to look at: keep them short, but say what a row is.
 
-The views are shown as tables, since the difference doesn’t matter for reading them.
+Views are shown as tables too, since the difference doesn’t matter for reading them.
 
 The time zone line in the table list comes from Django: with |USE_TZ|__ enabled, connections use UTC.
 If your users think in another time zone, say so in ``context``, so the model knows to convert with ``AT TIME ZONE`` for questions like “orders per day”.
@@ -227,8 +281,8 @@ The tools add more limits on top:
 
 Some things the role can still do, given PostgreSQL’s defaults:
 
-* Read the system catalogs, such as ``pg_views``, which shows the definitions of views, including the names of the tables and columns behind them, and ``pg_roles``, which lists role names.
-  It can’t read the tables themselves, or other roles’ queries in ``pg_stat_activity``.
+* Read the system catalogs, such as ``pg_class`` and ``pg_attribute``, which list every table and column, though not their data, ``pg_views``, which shows the definitions of views, and ``pg_roles``, which lists role names.
+  It can’t read the data of tables and columns it wasn’t granted, or other roles’ queries in ``pg_stat_activity``.
 
 * See other sessions of the same role in ``pg_stat_activity``, including their SQL, and cancel or terminate them.
   Since every caller of the tools shares the role, one could see another’s queries, which may quote their conversation.

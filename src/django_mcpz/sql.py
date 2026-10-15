@@ -26,6 +26,7 @@ from django_mcpz.server import MCPServer, ToolError
 try:
     import psycopg
     import psycopg.pq
+    from psycopg import sql as pg_sql
     from psycopg.types.json import JsonbLoader
 except ImportError:  # pragma: no cover
     psycopg = None  # type: ignore[assignment]
@@ -441,6 +442,143 @@ def _shorten(value: Any, max_value: int) -> tuple[Any, bool]:
     if len(text) <= max_value:
         return value, False
     return f"{text[:max_value]}… [{len(text) - max_value} more characters]", True
+
+
+# Role management
+
+
+def sync_sql_grants(
+    *,
+    models: Sequence[type[Model]],
+    reader: str,
+    using: str = "default",
+) -> None:
+    """
+    Make the role that the reader database alias logs in as able to SELECT
+    exactly the columns of the models' tables, and nothing else.
+
+    Run on the using connection, typically from a post_migrate handler, so
+    grants follow the models as they change. This creates the role if it's
+    missing, with the alias's password, grants it CONNECT on the database
+    and USAGE on the tables' schemas, revokes everything it was granted on
+    other tables and columns, then grants SELECT on each model's columns.
+    It all happens in one transaction, so the role never sees a half-way
+    state.
+    """
+    connection = connections[using]
+    if connection.vendor != "postgresql":
+        raise ImproperlyConfigured(
+            f"sync_sql_grants() needs a PostgreSQL database, but {using!r} is"
+            f" {connection.vendor}."
+        )
+    reader_settings = connections[reader].settings_dict
+    role = reader_settings["USER"]
+    if not role:
+        raise ImproperlyConfigured(
+            f"sync_sql_grants() needs the {reader!r} database alias to set"
+            " USER, the role it logs in as."
+        )
+    if role == connection.settings_dict["USER"]:
+        raise ImproperlyConfigured(
+            f"The {reader!r} and {using!r} database aliases log in as the same"
+            f" role, {role!r}, so it can't be limited to reading the models."
+        )
+    wanted = _wanted_columns(models, connection)
+    with transaction.atomic(using=using):
+        connection.ensure_connection()
+        pg_connection = connection.connection
+        with pg_connection.cursor() as cursor:
+            role_id = pg_sql.Identifier(role)
+            cursor.execute("SELECT FROM pg_roles WHERE rolname = %s", [role])
+            if cursor.fetchone() is None:
+                cursor.execute(
+                    pg_sql.SQL("CREATE ROLE {} LOGIN PASSWORD {}").format(
+                        role_id, pg_sql.Literal(reader_settings["PASSWORD"] or None)
+                    )
+                )
+            cursor.execute(
+                pg_sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(
+                    pg_sql.Identifier(pg_connection.info.dbname), role_id
+                )
+            )
+            # Everything the role has been granted, on tables or columns.
+            # Revoking on a table revokes on its columns too.
+            cursor.execute(_GRANTED_TABLES_SQL, {"role": role})
+            for (relation,) in cursor.fetchall():
+                cursor.execute(
+                    pg_sql.SQL("REVOKE ALL ON TABLE {} FROM {}").format(
+                        pg_sql.SQL(relation), role_id
+                    )
+                )
+            for table, columns in wanted.items():
+                cursor.execute(
+                    "SELECT to_regclass(%s)::text, n.nspname FROM pg_class c"
+                    " JOIN pg_namespace n ON n.oid = c.relnamespace"
+                    " WHERE c.oid = to_regclass(%s)",
+                    [quote_name(table), quote_name(table)],
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    raise ImproperlyConfigured(
+                        f"sync_sql_grants() can't find the table {table!r}."
+                        " Create it, or its view, in a migration."
+                    )
+                relation, schema = row
+                cursor.execute(
+                    pg_sql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(
+                        pg_sql.Identifier(schema), role_id
+                    )
+                )
+                cursor.execute(
+                    pg_sql.SQL("GRANT SELECT ({}) ON TABLE {} TO {}").format(
+                        pg_sql.SQL(", ").join(map(pg_sql.Identifier, columns)),
+                        pg_sql.SQL(relation),
+                        role_id,
+                    )
+                )
+
+
+# Tables, views, and so on, where the role holds privileges on the relation
+# or on any of its columns, granted explicitly rather than through PUBLIC.
+_GRANTED_TABLES_SQL = """
+SELECT c.oid::regclass::text
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+AND (
+    EXISTS (
+        SELECT FROM aclexplode(c.relacl) a
+        WHERE a.grantee = (SELECT oid FROM pg_roles WHERE rolname = %(role)s)
+    )
+    OR EXISTS (
+        SELECT FROM pg_attribute att, aclexplode(att.attacl) a
+        WHERE att.attrelid = c.oid
+        AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = %(role)s)
+    )
+)
+ORDER BY 1
+"""
+
+
+def _wanted_columns(
+    models: Sequence[type[Model]], connection: BaseDatabaseWrapper
+) -> dict[str, list[str]]:
+    """
+    The columns of each model's table, merging models that share a table, as
+    unmanaged models exposing different columns of one table may.
+    """
+    wanted: dict[str, list[str]] = {}
+    for model in models:
+        columns = wanted.setdefault(model._meta.db_table, [])
+        for field in model._meta.local_concrete_fields:
+            column = field.column
+            if (
+                column is not None
+                and _db_type(field, connection) is not None
+                and column not in columns
+            ):
+                columns.append(column)
+    return wanted
 
 
 # Schema description

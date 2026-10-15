@@ -349,9 +349,9 @@ As covered in :doc:`sql`.
         The :class:`~django_mcpz.server.MCPServer` to add the tools to.
 
     :param models:
-        The models whose tables the model may query, typically unmanaged models for views.
+        The models whose tables the model may query: regular models, unmanaged models exposing some columns of a table, or unmanaged models for views.
         Their documentation drives the schema tool.
-        They don’t restrict queries, which is the job of the database role.
+        They don’t restrict queries themselves, which is the job of the database role, maintained by :func:`sync_sql_grants`.
 
     :param using:
         The alias of the database connection to run queries on, which must be PostgreSQL, connecting with psycopg 3, as a role that can only read the tables of ``models``.
@@ -380,6 +380,29 @@ As covered in :doc:`sql`.
         An optional permission for both tools, as for :meth:`~django_mcpz.server.MCPServer.tool`.
 
     Raises ``ImproperlyConfigured`` if the database isn’t PostgreSQL, ``models`` is empty, or a limit is out of range.
+
+.. function:: sync_sql_grants(*, models, reader, using="default")
+
+    Make the role that the ``reader`` database alias logs in as able to ``SELECT`` exactly the columns of the fields of ``models``, and nothing else.
+    Call it from a ``post_migrate`` handler, as covered in :doc:`sql`.
+
+    Running on the ``using`` connection, in one transaction, it:
+
+    * creates the role, as the alias’s ``USER``, if it doesn’t exist, with the alias’s ``PASSWORD``;
+    * grants it ``CONNECT`` on the database, and ``USAGE`` on the schemas of the models’ tables;
+    * revokes all its privileges on any table, view, or column;
+    * grants it ``SELECT`` on the columns of each model’s fields, merging models that share a table.
+
+    :param models:
+        The models to grant access to, as passed to :func:`add_sql_tools`.
+
+    :param reader:
+        The alias of the database connection the tools use.
+
+    :param using:
+        The alias of the database connection to make the changes on, whose role needs to be able to create roles, unless the role exists, and grant on the tables.
+
+    Raises ``ImproperlyConfigured`` if the database isn’t PostgreSQL, the ``reader`` alias has no ``USER`` or the same ``USER`` as ``using``, or a model’s table doesn’t exist.
 
 .. currentmodule:: django_mcpz.server
 

@@ -11,6 +11,9 @@ Unreleased
   See :doc:`servers`.
 
 * Add ``django_mcpz.sql.add_sql_tools()``, which adds tools letting a model run read-only SQL queries against chosen PostgreSQL views, plus describe them.
+
+* Add ``django_mcpz.sql.add_sql_tools()``, which adds tools letting a model run read-only SQL queries against chosen PostgreSQL tables, views, and columns, plus describe them.
+  ``django_mcpz.sql.sync_sql_grants()`` maintains the database role the queries run as.
   See :doc:`sql`.
 
 1.1.0 (2026-10-02)

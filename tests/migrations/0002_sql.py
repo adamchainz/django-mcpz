@@ -5,30 +5,13 @@ from __future__ import annotations
 from django.db import migrations, models
 
 
-def create_reader(apps, schema_editor):
+def seed_widgets(apps, schema_editor):
     """
-    Create the role the reader database alias logs in as, allowed to read
-    the view, plus the widgets in it, committed for the reader to see.
+    Widgets for the reader to query, committed, for it to see. The reader's
+    role and grants are made by the post_migrate handler in tests.apps.
     """
     if schema_editor.connection.vendor != "postgresql":
         return
-    database = schema_editor.quote_name(schema_editor.connection.settings_dict["NAME"])
-    schema_editor.execute(
-        """
-        DO $$
-        BEGIN
-            IF NOT EXISTS (
-                SELECT FROM pg_roles WHERE rolname = 'mcpz_test_reader'
-            ) THEN
-                CREATE ROLE mcpz_test_reader LOGIN PASSWORD 'mcpz_test_reader';
-            END IF;
-        END
-        $$
-        """
-    )
-    schema_editor.execute(f"GRANT CONNECT ON DATABASE {database} TO mcpz_test_reader")
-    schema_editor.execute("GRANT USAGE ON SCHEMA public TO mcpz_test_reader")
-    schema_editor.execute("GRANT SELECT ON tests_widget_view TO mcpz_test_reader")
     Widget = apps.get_model("tests", "Widget")
     Widget.objects.using(schema_editor.connection.alias).bulk_create(
         [
@@ -118,5 +101,5 @@ class Migration(migrations.Migration):
             "CREATE VIEW tests_widget_view AS SELECT id, name, price FROM tests_widget",
             "DROP VIEW tests_widget_view",
         ),
-        migrations.RunPython(create_reader, migrations.RunPython.noop, elidable=True),
+        migrations.RunPython(seed_widgets, migrations.RunPython.noop, elidable=True),
     ]
