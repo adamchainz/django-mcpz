@@ -75,6 +75,18 @@ WHERE rolname = session_user
 _ONLY_SELECT = "Only a single SELECT statement is allowed, or WITH, VALUES, or TABLE."
 
 
+class SQLSchemaParams(msgspec.Struct):
+    tables: Annotated[
+        list[str] | None,
+        msgspec.Meta(
+            description=(
+                "Tables to describe the columns of. Leave out to list the"
+                " tables instead."
+            )
+        ),
+    ] = None
+
+
 class SQLQueryParams(msgspec.Struct):
     sql: Annotated[
         str,
@@ -93,15 +105,16 @@ def add_sql_tools(
     models: Sequence[type[Model]],
     using: str,
     context: str | None = None,
-    max_rows: int = 100,
+    max_rows: int = 1000,
     max_size: int = 50_000,
-    timeout: float = 5.0,
+    timeout: float = 10.0,
     name_prefix: str = "sql",
     permission: Callable[[HttpRequest], bool] | str | None = None,
 ) -> None:
     """
-    Add two tools to the server: one describing the tables of the given
-    models, as SQL, and one running a read-only query against them.
+    Add two tools to the server: one listing the tables of the given models,
+    or describing the columns of some, as SQL, and one running a read-only
+    query against them.
 
     The queries run on the database connection named by using, which should
     log in as a PostgreSQL role that may only SELECT from those tables. That
@@ -132,34 +145,52 @@ def add_sql_tools(
         raise ImproperlyConfigured("timeout must be positive.")
 
     model_list = list(models)
-    tables = ", ".join(quote_name(model._meta.db_table) for model in model_list)
     schema_name = f"{name_prefix}_schema"
     query_name = f"{name_prefix}_query"
 
     @server.tool(
         name=schema_name,
         description=(
-            f"The tables {query_name} can query, as CREATE TABLE statements"
-            " with comments explaining the data. Call this before writing"
-            f" queries. Tables: {tables}."
+            f"Without tables, list the tables {query_name} can query, with"
+            " what they hold. With tables, describe their columns, as CREATE"
+            " TABLE statements with comments explaining the data. Call this"
+            " before writing queries."
         ),
         read_only=True,
         idempotent=True,
         open_world=False,
         permission=permission,
     )
-    def sql_schema(request: HttpRequest) -> str:
-        return describe_models(model_list, using=using, context=context)
+    def sql_schema(request: HttpRequest, params: SQLSchemaParams) -> str:
+        if not params.tables:
+            return list_tables(
+                model_list, using=using, context=context, schema_tool=schema_name
+            )
+        by_name = {model._meta.db_table: model for model in model_list}
+        # Accept names as the model would write them in SQL, quoted or not.
+        names = [name.strip().strip('"').replace('""', '"') for name in params.tables]
+        unknown = [name for name in names if name not in by_name]
+        if unknown:
+            raise ToolError(
+                f"Unknown tables: {', '.join(quote_name(n) for n in unknown)}."
+                " Available tables:"
+                f" {', '.join(quote_name(n) for n in by_name)}."
+            )
+        return describe_models(
+            [by_name[name] for name in dict.fromkeys(names)],
+            using=using,
+            all_models=model_list,
+        )
 
     @server.tool(
         name=query_name,
         description=(
             "Run one read-only PostgreSQL SELECT query and get the result rows,"
             ' as JSON: "columns" names the columns, and "rows" holds one array'
-            f" of values per row. Only these tables are available: {tables}."
-            f" Call {schema_name} for their columns first. At most {max_rows}"
-            " rows are returned, so aggregate, filter, and sort in SQL rather"
-            " than fetching everything. Queries time out after"
+            f" of values per row. Call {schema_name} to find the tables and"
+            f" their columns first. At most {max_rows} rows are returned, and"
+            " large results are cut short, so aggregate, filter, and sort in"
+            " SQL rather than fetching everything. Queries time out after"
             f" {timeout:g} seconds."
         ),
         read_only=True,
@@ -415,31 +446,58 @@ def _shorten(value: Any, max_value: int) -> tuple[Any, bool]:
 # Schema description
 
 
-def describe_models(
+def list_tables(
     model_list: Sequence[type[Model]],
     *,
     using: str,
     context: str | None = None,
+    schema_tool: str = "sql_schema",
+) -> str:
+    """
+    List the tables of the models, each with its description, from the
+    model's db_table_comment or docstring, plus the context and anything else
+    that applies to every query.
+    """
+    connection = connections[using]
+    parts = []
+    if context:
+        parts.append(context.strip())
+    parts.append(
+        f"Queries run with the time zone {connection.timezone_name}, which"
+        " applies to date functions on timestamp with time zone columns."
+    )
+    lines = ["Tables:"]
+    for model in model_list:
+        line = f"- {quote_name(model._meta.db_table)}"
+        description = _table_description(model)
+        if description:
+            line += f": {' '.join(description.split())}"
+        lines.append(line)
+    parts.append("\n".join(lines))
+    parts.append(f"Call {schema_tool} with tables to see their columns.")
+    return "\n\n".join(parts) + "\n"
+
+
+def describe_models(
+    model_list: Sequence[type[Model]],
+    *,
+    using: str,
+    all_models: Sequence[type[Model]] | None = None,
 ) -> str:
     """
     Describe the tables of the models as CREATE TABLE statements, with
     comments from each model's db_table_comment or docstring, and each
-    field's db_comment or help_text, verbose name, and choices.
+    field's db_comment or help_text, verbose name, and choices. Foreign keys
+    to tables of all_models, by default the same models, get REFERENCES.
     """
     connection = connections[using]
-    tables = {model._meta.db_table for model in model_list}
-    parts = []
-    if context:
-        parts.append(_comment(context))
-    parts.append(
-        _comment(
-            f"Queries run with the time zone {connection.timezone_name}, which"
-            " applies to date functions on timestamp with time zone columns."
-        )
-    )
-    for model in model_list:
-        parts.append(_describe_model(model, connection, tables))
+    tables = {model._meta.db_table for model in (all_models or model_list)}
+    parts = [_describe_model(model, connection, tables) for model in model_list]
     return "\n\n".join(parts) + "\n"
+
+
+def _table_description(model: type[Model]) -> str:
+    return model._meta.db_table_comment or _docstring(model)
 
 
 def _describe_model(
@@ -447,7 +505,7 @@ def _describe_model(
 ) -> str:
     opts = model._meta
     lines = []
-    description = opts.db_table_comment or _docstring(model)
+    description = _table_description(model)
     if description:
         lines.append(_comment(description))
     lines.append(f"CREATE TABLE {quote_name(opts.db_table)} (")

@@ -22,16 +22,24 @@ from django_mcpz.sql import (
     add_sql_tools,
     describe_models,
     encode_result,
+    list_tables,
     run_query,
 )
 from tests.models import Child, Pair, Part, Reserved, Undocumented, WidgetView
 from tests.test_server import ServerTestCase, make_message
 
+TABLES = """\
+Test widgets.
+
+Queries run with the time zone UTC, which applies to date functions on timestamp with time zone columns.
+
+Tables:
+- tests_widget_view: Widgets for sale, without their stock levels.
+
+Call sql_schema with tables to see their columns.
+"""
+
 SCHEMA = """\
--- Test widgets.
-
--- Queries run with the time zone UTC, which applies to date functions on timestamp with time zone columns.
-
 -- Widgets for sale, without their stock levels.
 CREATE TABLE tests_widget_view (
   id bigint NOT NULL PRIMARY KEY,
@@ -100,20 +108,42 @@ class AddSQLToolsTests(SimpleTestCase):
         assert not server._tools["widgets_query"].permitted(mock.Mock())
 
 
+class ListTablesTests(SimpleTestCase):
+    def test_tables(self):
+        assert list_tables(
+            [WidgetView, Undocumented, Reserved, Part],
+            using="reader",
+            schema_tool="widgets_schema",
+        ) == (
+            "Queries run with the time zone UTC, which applies to date"
+            " functions on timestamp with time zone columns.\n"
+            "\n"
+            "Tables:\n"
+            "- tests_widget_view: Widgets for sale, without their stock levels.\n"
+            "- tests_undocumented\n"
+            '- "order"\n'
+            "- tests_part: Parts that make up widgets.\n"
+            "\n"
+            "Call widgets_schema with tables to see their columns.\n"
+        )
+
+
 class DescribeModelsTests(SimpleTestCase):
     def test_view(self):
-        assert (
-            describe_models([WidgetView], using="reader", context="Test widgets.")
-            == SCHEMA
+        assert describe_models([WidgetView], using="reader") == SCHEMA
+
+    def test_all_models(self):
+        # References to tables outside the described ones, but queryable.
+        assert describe_models(
+            [Part], using="reader", all_models=[WidgetView, Part]
+        ).splitlines()[4] == (
+            "  widget_id bigint NOT NULL REFERENCES tests_widget_view (id),"
         )
 
     def test_fields(self):
         # Part references WidgetView, which is described, and Widget, which is
         # not, so only the first gets a REFERENCES.
         assert describe_models([WidgetView, Part, Undocumented], using="reader") == (
-            "-- Queries run with the time zone UTC, which applies to date"
-            " functions on timestamp with time zone columns.\n"
-            "\n"
             "-- Widgets for sale, without their stock levels.\n"
             "CREATE TABLE tests_widget_view (\n"
             "  id bigint NOT NULL PRIMARY KEY,\n"
@@ -141,7 +171,7 @@ class DescribeModelsTests(SimpleTestCase):
 
 class DescribeEdgeCasesTests(SimpleTestCase):
     def test_quoting_and_no_column(self):
-        assert describe_models([Reserved], using="reader").split("\n\n")[1] == (
+        assert describe_models([Reserved], using="reader").split("\n\n")[0] == (
             'CREATE TABLE "order" (\n'
             "  id bigint NOT NULL PRIMARY KEY,\n"
             '  "User" integer NOT NULL,\n'
@@ -150,7 +180,7 @@ class DescribeEdgeCasesTests(SimpleTestCase):
         )
 
     def test_composite_primary_key(self):
-        assert describe_models([Pair], using="reader").split("\n\n")[1] == (
+        assert describe_models([Pair], using="reader").split("\n\n")[0] == (
             "CREATE TABLE tests_pair (\n"
             "  left_id integer NOT NULL,\n"
             "  right_id integer NOT NULL,\n"
@@ -160,7 +190,7 @@ class DescribeEdgeCasesTests(SimpleTestCase):
 
     def test_multi_table_inheritance(self):
         # Only the child table's own columns.
-        assert describe_models([Child], using="reader").split("\n\n")[1] == (
+        assert describe_models([Child], using="reader").split("\n\n")[0] == (
             "CREATE TABLE tests_child (\n"
             "  parent_ptr_id bigint NOT NULL PRIMARY KEY,\n"
             "  age integer NOT NULL\n"
@@ -360,17 +390,21 @@ class SQLServerTests(ServerTestCase, TestCase):
         response = self.post(make_message("tools/list"))
         tools = {tool["name"]: tool for tool in response.json()["result"]["tools"]}
         assert tools["sql_schema"]["description"] == (
-            "The tables sql_query can query, as CREATE TABLE statements with"
-            " comments explaining the data. Call this before writing queries."
-            " Tables: tests_widget_view."
+            "Without tables, list the tables sql_query can query, with what"
+            " they hold. With tables, describe their columns, as CREATE TABLE"
+            " statements with comments explaining the data. Call this before"
+            " writing queries."
         )
+        assert tools["sql_schema"]["inputSchema"]["properties"]["tables"]["anyOf"][
+            0
+        ] == {"type": "array", "items": {"type": "string"}}
         assert tools["sql_query"]["description"] == (
             "Run one read-only PostgreSQL SELECT query and get the result rows,"
             ' as JSON: "columns" names the columns, and "rows" holds one array'
-            " of values per row. Only these tables are available:"
-            " tests_widget_view. Call sql_schema for their columns first. At"
-            " most 2 rows are returned, so aggregate, filter, and sort in SQL"
-            " rather than fetching everything. Queries time out after 1 seconds."
+            " of values per row. Call sql_schema to find the tables and their"
+            " columns first. At most 2 rows are returned, and large results"
+            " are cut short, so aggregate, filter, and sort in SQL rather than"
+            " fetching everything. Queries time out after 1 seconds."
         )
         assert tools["sql_query"]["annotations"] == {
             "readOnlyHint": True,
@@ -379,9 +413,27 @@ class SQLServerTests(ServerTestCase, TestCase):
         }
         assert tools["sql_query"]["inputSchema"]["required"] == ["sql"]
 
-    def test_schema(self):
+    def test_schema_tables(self):
         result = self.call("sql_schema")
+        assert result["content"] == [{"type": "text", "text": TABLES}]
+
+    def test_schema_tables_empty(self):
+        result = self.call("sql_schema", {"tables": []})
+        assert result["content"] == [{"type": "text", "text": TABLES}]
+
+    def test_schema_columns(self):
+        # Names as written in SQL, quoted or not, and repeated.
+        result = self.call(
+            "sql_schema", {"tables": ["tests_widget_view", '"tests_widget_view"']}
+        )
         assert result["content"] == [{"type": "text", "text": SCHEMA}]
+
+    def test_schema_unknown(self):
+        result = self.call("sql_schema", {"tables": ["tests_widget", "Nope"]})
+        assert result["isError"]
+        assert result["content"][0]["text"] == (
+            'Unknown tables: tests_widget, "Nope". Available tables: tests_widget_view.'
+        )
 
     def test_query(self):
         assert self.query("SELECT count(*) FROM tests_widget_view") == {

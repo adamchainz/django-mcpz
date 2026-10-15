@@ -341,9 +341,9 @@ SQL queries
 
 As covered in :doc:`sql`.
 
-.. function:: add_sql_tools(server, *, models, using, context=None, max_rows=100, max_size=50000, timeout=5.0, name_prefix="sql", permission=None)
+.. function:: add_sql_tools(server, *, models, using, context=None, max_rows=1000, max_size=50000, timeout=10.0, name_prefix="sql", permission=None)
 
-    Add two tools to ``server``: ``<name_prefix>_schema``, describing the tables of ``models``, and ``<name_prefix>_query``, running one read-only PostgreSQL query against them.
+    Add two tools to ``server``: ``<name_prefix>_schema``, listing the tables of ``models``, or describing the columns of some, and ``<name_prefix>_query``, running one read-only PostgreSQL query against them.
 
     :param server:
         The :class:`~django_mcpz.server.MCPServer` to add the tools to.
@@ -357,18 +357,21 @@ As covered in :doc:`sql`.
         The alias of the database connection to run queries on, which must be PostgreSQL, connecting with psycopg 3, as a role that can only read the tables of ``models``.
 
     :param context:
-        Optional text shown at the top of the schema, for anything that applies across tables.
+        Optional text shown at the top of the table list, for anything that applies across tables.
 
     :param max_rows:
         The most rows a query returns.
         The model is told the limit and when it was hit.
+        ``max_size`` usually binds first, except for narrow results.
 
     :param max_size:
         Roughly the most bytes of JSON a query returns, so results fit in the model’s context.
-        Rows beyond it are left out, and text values longer than a tenth of it are shortened.
+        The default, around 15,000 tokens, stays under the 25,000 tokens Claude Code accepts from a tool by default, with room for the model to make several queries.
+        Rows beyond it are left out, and long values are shortened to a fair share of it.
 
     :param timeout:
         The statement timeout for queries, in seconds.
+        Fetching rows is timed separately, so a call can take up to about twice this, which must fit within your web server’s request timeout, such as Gunicorn’s default of 30 seconds.
 
     :param name_prefix:
         The prefix for the tools’ names, for adding sets of tools for several databases to one server.

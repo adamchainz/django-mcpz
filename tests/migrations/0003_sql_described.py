@@ -9,7 +9,6 @@ import tests.models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("tests", "0002_sql"),
     ]

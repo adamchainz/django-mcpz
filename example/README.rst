@@ -81,7 +81,7 @@ Then ask a question the other tools can’t answer:
     claude --mcp-config mcp.json --strict-mcp-config --allowedTools "mcp__mcpizza__*" \
       -p "How has the share of orders coming from AI assistants changed month by month? Give me a small table."
 
-Example output, after the model called ``sql_schema`` then ``sql_query`` once:
+Example output, after the model called ``sql_schema`` to list the tables, then again for their columns, then ``sql_query`` once:
 
 .. code-block:: text
 

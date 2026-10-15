@@ -6,7 +6,7 @@ SQL queries
 Language models write good SQL.
 Rather than writing a tool for every question someone might ask of your data, you can let the model query it directly, with :func:`add_sql_tools`, which adds two tools to a server:
 
-* ``sql_schema`` describes the tables the model may query, as ``CREATE TABLE`` statements with comments.
+* ``sql_schema`` lists the tables the model may query, then describes the columns of the ones it picks, as ``CREATE TABLE`` statements with comments.
 * ``sql_query`` runs one read-only ``SELECT`` statement and returns the rows.
 
 This works with PostgreSQL only, through `psycopg 3 <https://www.psycopg.org/psycopg3/>`__.
@@ -145,34 +145,41 @@ The setup takes five steps: views, models for them, a role, a database alias, an
 What the model sees
 -------------------
 
-``sql_schema`` returns SQL, the format models know best for describing tables.
+``sql_schema`` works in two steps, so a large schema doesn’t fill the model’s context up front.
+Called without arguments, it lists the tables, each with its description from the model.
 For the example project:
 
+.. code-block:: text
+
+    MCPizza's sales data. Prices and totals are in pounds (GBP).
+
+    Queries run with the time zone UTC, which applies to date functions on timestamp with time zone columns.
+
+    Tables:
+    - pizzeria_report_menu_item: Every pizza MCPizza has sold, including specials no longer on the menu.
+    - pizzeria_report_order_line: One row per order. The customer’s free-text requests are not exposed, only whether there were any.
+
+    Call sql_schema with tables to see their columns.
+
+The model then calls it again with the tables it needs, such as ``{"tables": ["pizzeria_report_order_line"]}``, and gets their columns as SQL, the format models know best for describing tables:
+
 .. code-block:: sql
-
-    -- MCPizza's sales data. Prices and totals are in pounds (GBP).
-
-    -- Queries run with the time zone UTC, which applies to date functions on timestamp with time zone columns.
-
-    -- Every pizza MCPizza has sold, including specials no longer on the menu.
-    CREATE TABLE pizzeria_report_menu_item (
-      id bigint NOT NULL PRIMARY KEY,
-      name varchar(100) NOT NULL,
-      price numeric(5, 2) NOT NULL,  -- Current price, in pounds.
-      ...
-    );
 
     -- One row per order. The customer’s free-text requests are not exposed, only whether there were any.
     CREATE TABLE pizzeria_report_order_line (
       id bigint NOT NULL PRIMARY KEY,
       pizza_id bigint NOT NULL REFERENCES pizzeria_report_menu_item (id),
+      quantity smallint NOT NULL,
+      total numeric(7, 2) NOT NULL,  -- Price paid for the whole order, in pounds.
       ...
       channel varchar(10) NOT NULL  -- Values: 'web' = Website, 'phone' = Telephone, 'mcp' = An AI assistant, over MCP.
     );
 
+So the table descriptions are the model’s guide to which tables to look at: keep them short, but say what a row is.
+
 The views are shown as tables, since the difference doesn’t matter for reading them.
 
-The time zone line comes from Django: with |USE_TZ|__ enabled, connections use UTC.
+The time zone line in the table list comes from Django: with |USE_TZ|__ enabled, connections use UTC.
 If your users think in another time zone, say so in ``context``, so the model knows to convert with ``AT TIME ZONE`` for questions like “orders per day”.
 
 .. |USE_TZ| replace:: ``USE_TZ``
