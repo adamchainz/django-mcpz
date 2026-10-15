@@ -46,9 +46,7 @@ def seed_orders(apps, schema_editor):
         busy = 1.6 if day.weekday() >= 4 else 1.0
         progress = (90 - days_ago) / 90
         for _ in range(int(rng.randint(8, 16) * busy)):
-            pizza = rng.choices(
-                [p for p, _ in available], [w for _, w in available]
-            )[0]
+            pizza = rng.choices([p for p, _ in available], [w for _, w in available])[0]
             quantity = rng.choices([1, 2, 3, 4, 6], [50, 25, 12, 8, 5])[0]
             channel = rng.choices(
                 ["web", "phone", "mcp"],

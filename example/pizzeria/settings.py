@@ -66,8 +66,7 @@ if os.environ.get("MCPIZZA_POSTGRES"):
             "HOST": os.environ.get("PGHOST", "localhost"),
             "USER": "mcpizza_reader",
             "PASSWORD": "mcpizza",
-            # Tests use the default connection, rather than a test database
-            # for this alias.
+            # In tests, connect to the default alias's test database.
             "TEST": {"MIRROR": "default"},
         },
     }

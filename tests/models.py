@@ -48,3 +48,43 @@ class Part(models.Model):
 class Undocumented(models.Model):
     class Meta:
         managed = False
+
+
+class NoColumnField(models.IntegerField):  # type: ignore[type-arg]
+    # Like fields such as GenericRelation, which have no column.
+    def db_type(self, connection):
+        return None
+
+
+class Reserved(models.Model):
+    # Described, never queried, with names that need quoting.
+    user = models.IntegerField(db_column="User")
+    label = models.CharField(max_length=10, verbose_name="")
+    nothing = NoColumnField()
+
+    class Meta:
+        managed = False
+        db_table = "order"
+
+
+class Pair(models.Model):
+    pk = models.CompositePrimaryKey("left_id", "right_id")
+    left_id = models.IntegerField()
+    right_id = models.IntegerField()
+
+    class Meta:
+        managed = False
+
+
+class Parent(models.Model):
+    name = models.CharField(max_length=10)
+
+    class Meta:
+        managed = False
+
+
+class Child(Parent):
+    age = models.IntegerField()
+
+    class Meta:
+        managed = False

@@ -93,7 +93,8 @@ The setup takes five steps: views, models for them, a role, a database alias, an
        GRANT SELECT ON pizzeria_report_menu_item, pizzeria_report_order_line TO mcp_reader;
 
    Don’t make it a member of any other role, which it could switch to with ``SET ROLE``, and don’t grant it anything on ``PUBLIC`` beyond PostgreSQL’s defaults.
-   Remember to grant ``SELECT`` on new views as you add them.
+   Each query checks that the login role isn’t a superuser, can’t bypass row-level security, and isn’t a member of other roles, failing with ``ImproperlyConfigured`` otherwise.
+   Remember to grant ``SELECT`` on new views as you add them, such as in the migrations that create them.
 
 4. Add a database alias that connects as the role:
 
@@ -110,11 +111,17 @@ The setup takes five steps: views, models for them, a role, a database alias, an
                "NAME": "app",
                "USER": "mcp_reader",
                "PASSWORD": os.environ["MCP_READER_PASSWORD"],
-               # In tests, share the default connection, rather than creating
-               # a test database for this alias.
+               # In tests, connect to the default alias’s test database, as
+               # the reader role, rather than creating another.
                "TEST": {"MIRROR": "default"},
            },
        }
+
+   The alias must log in as the role.
+   Django’s ``assume_role`` option won’t do, since queries could switch back to the login role, so :func:`add_sql_tools` rejects it.
+
+   In tests, the mirrored alias is still a separate connection, which sees only committed data, so test the tools with ``TransactionTestCase`` rather than ``TestCase``.
+   The role also needs its grants on the test database, which granting in migrations takes care of.
 
    If you use a `database router <https://docs.djangoproject.com/en/stable/topics/db/multi-db/#database-routers>`__, make sure it doesn’t send migrations to this alias.
 
@@ -181,11 +188,12 @@ __ https://docs.djangoproject.com/en/stable/ref/settings/#std-setting-USE_TZ
     }
 
 This is nearly as compact as CSV, which saves only around 10–15% on typical results, but keeps types and nulls unambiguous.
-Decimals are numbers, dates and times ISO 8601 strings, JSON columns nested JSON, and other types, like ranges, their PostgreSQL text form.
+Decimals are numbers, except NaN and infinities, which are strings, as JSON has no numbers for them.
+Dates and times are ISO 8601 strings, ``json`` and ``jsonb`` columns are nested JSON, and other types, like ranges, are in their PostgreSQL text form.
 
 When rows are left out, the result adds ``"truncated": true`` and a ``"note"`` telling the model to aggregate or filter.
 Rows are left out past ``max_rows``, or when the result would exceed ``max_size``.
-Long text values are shortened too, so a single huge value can’t flood the model’s context.
+Long values are shortened too, to a fair share of ``max_size``, so a single huge value can’t flood the model’s context.
 
 Errors in the query, such as syntax errors, unknown columns, and permission denied, are returned to the model as tool errors, with PostgreSQL’s message, so it can correct itself.
 
@@ -205,7 +213,8 @@ The tools add more limits on top:
 * A ``statement_timeout`` stops long-running queries.
   Changing it with ``set_config()`` inside a query doesn’t affect that query, and the change is rolled back afterwards.
 
-* Rows are fetched from the cursor only up to the limit, so a query for millions of rows transfers only the first ones.
+* Rows are fetched from the cursor in batches, stopping at ``max_rows``, once values totalling ``max_size`` have arrived, or once the timeout has passed.
+  The first batch is a single row, and later ones are sized to fit what remains of ``max_size``, so a query for millions of rows, or for huge values, transfers only the first few.
 
 * Session-level advisory locks, taken with functions like ``pg_advisory_lock()``, are released after each query, as they survive the rollback.
 
@@ -214,8 +223,15 @@ Some things the role can still do, given PostgreSQL’s defaults:
 * Read the system catalogs, such as ``pg_views``, which shows the definitions of views, including the names of the tables and columns behind them, and ``pg_roles``, which lists role names.
   It can’t read the tables themselves, or other roles’ queries in ``pg_stat_activity``.
 
-* Use CPU, memory, and I/O for up to the timeout, per call.
-  A single huge value, such as from ``repeat('x', 100000000)``, is transferred in full before being shortened.
-  Use your server’s ``auth`` and the ``permission`` argument to limit who can call the tools, and consider pointing the alias at a read replica.
+* See other sessions of the same role in ``pg_stat_activity``, including their SQL, and cancel or terminate them.
+  Since every caller of the tools shares the role, one could see another’s queries, which may quote their conversation.
+  To hide them, a superuser can run ``ALTER ROLE mcp_reader SET track_activities = off``.
+
+* Take advisory locks, which are database-wide, for up to the timeout, which could block your application if it uses them.
+
+* Use CPU, memory, and I/O for roughly up to twice the timeout, per call, as the query and fetching the rows are timed separately.
+  A row is transferred in full, so a query returning a huge value, such as from ``repeat('x', 100000000)``, uses that much memory in your Django process before it is shortened.
+
+Use your server’s ``auth`` and the ``permission`` argument to limit who can call the tools, and consider pointing the alias at a read replica.
 
 The tools are marked as read-only, with ``readOnlyHint``, so clients may run them without asking the user each time.

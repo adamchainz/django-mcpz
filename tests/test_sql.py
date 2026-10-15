@@ -16,6 +16,7 @@ from django.test import SimpleTestCase, TestCase, TransactionTestCase
 
 from django_mcpz.server import MCPServer, ToolError, public
 from django_mcpz.sql import (
+    _fetch,
     _release_advisory_locks,
     _strip_declare,
     add_sql_tools,
@@ -23,7 +24,7 @@ from django_mcpz.sql import (
     encode_result,
     run_query,
 )
-from tests.models import Part, Undocumented, WidgetView
+from tests.models import Child, Pair, Part, Reserved, Undocumented, WidgetView
 from tests.test_server import ServerTestCase, make_message
 
 SCHEMA = """\
@@ -73,6 +74,19 @@ class AddSQLToolsTests(SimpleTestCase):
             add_sql_tools(server, models=[WidgetView], using="reader", timeout=0)
         assert str(excinfo.value) == "timeout must be positive."
 
+    def test_assume_role(self):
+        server = MCPServer(name="s", version="1", auth=public)
+        with (
+            mock.patch.dict(
+                connections["reader"].settings_dict["OPTIONS"], {"assume_role": "x"}
+            ),
+            pytest.raises(ImproperlyConfigured) as excinfo,
+        ):
+            add_sql_tools(server, models=[WidgetView], using="reader")
+        assert str(excinfo.value).startswith(
+            "add_sql_tools() needs 'reader' to log in as the reader role,"
+        )
+
     def test_name_prefix_and_permission(self):
         server = MCPServer(name="s", version="1", auth=public)
         add_sql_tools(
@@ -121,6 +135,35 @@ class DescribeModelsTests(SimpleTestCase):
             "\n"
             "CREATE TABLE tests_undocumented (\n"
             "  id bigint NOT NULL PRIMARY KEY\n"
+            ");\n"
+        )
+
+
+class DescribeEdgeCasesTests(SimpleTestCase):
+    def test_quoting_and_no_column(self):
+        assert describe_models([Reserved], using="reader").split("\n\n")[1] == (
+            'CREATE TABLE "order" (\n'
+            "  id bigint NOT NULL PRIMARY KEY,\n"
+            '  "User" integer NOT NULL,\n'
+            "  label varchar(10) NOT NULL\n"
+            ");\n"
+        )
+
+    def test_composite_primary_key(self):
+        assert describe_models([Pair], using="reader").split("\n\n")[1] == (
+            "CREATE TABLE tests_pair (\n"
+            "  left_id integer NOT NULL,\n"
+            "  right_id integer NOT NULL,\n"
+            "  PRIMARY KEY (left_id, right_id)\n"
+            ");\n"
+        )
+
+    def test_multi_table_inheritance(self):
+        # Only the child table's own columns.
+        assert describe_models([Child], using="reader").split("\n\n")[1] == (
+            "CREATE TABLE tests_child (\n"
+            "  parent_ptr_id bigint NOT NULL PRIMARY KEY,\n"
+            "  age integer NOT NULL\n"
             ");\n"
         )
 
@@ -187,24 +230,59 @@ class EncodeResultTests(SimpleTestCase):
 
     def test_long_value(self):
         result = decode(
-            encode_result(
-                ["a"], [("x" * 2000,), ("y",)], more=False, max_size=1000
-            )
+            encode_result(["a"], [("x" * 2000,), ("y",)], more=False, max_size=1000)
         )
         assert result == {
             "columns": ["a"],
             "rows": [["x" * 100 + "… [1900 more characters]"], ["y"]],
             "truncated": True,
             "note": (
-                "Long text values were shortened. Select substr() of them to"
-                " read specific parts."
+                "Long values were shortened. Select parts of them, such as with"
+                " substr(), to read more."
             ),
         }
 
+    def test_long_other_values(self):
+        result = decode(
+            encode_result(
+                ["a", "b", "c"],
+                [(b"x" * 200, ["y" * 200], {"z": "z" * 200})],
+                more=False,
+                max_size=1000,
+            )
+        )
+        assert [len(value) for value in result["rows"][0]] == [123] * 3
+        assert result["rows"][0][1].startswith('["yyy')
+        assert result["truncated"] is True
+
+    def test_wide_row(self):
+        # Many columns share the budget, so even one row fits.
+        row = tuple("x" * 200 for _ in range(20))
+        raw = encode_result(["a"] * 20, [row], more=False, max_size=1000)
+        # Roughly, since each shortened value gains a suffix.
+        assert len(bytes(raw)) < 2000
+        assert decode(raw)["rows"][0][0] == "x" * 50 + "… [150 more characters]"
+
+    def test_not_finite(self):
+        row = (
+            float("nan"),
+            float("inf"),
+            float("-inf"),
+            Decimal("NaN"),
+            Decimal("Infinity"),
+            Decimal("-Infinity"),
+        )
+        result = decode(encode_result(["a"] * 6, [row], more=False, max_size=1000))
+        assert result["rows"] == [
+            ["NaN", "Infinity", "-Infinity", "NaN", "Infinity", "-Infinity"]
+        ]
+
     def test_first_row_kept(self):
         # Even when one row is over budget, it is shown, rather than none.
-        row = tuple("x" * 100 for _ in range(20))
-        result = decode(encode_result(["a"] * 20, [row, row], more=False, max_size=1000))
+        row = tuple("x" * 90 for _ in range(10))
+        result = decode(
+            encode_result(["a"] * 10, [row, row], more=False, max_size=1000)
+        )
         assert len(result["rows"]) == 1
         assert result["note"].startswith("Only the first 1 rows are shown.")
 
@@ -222,6 +300,43 @@ class ReleaseAdvisoryLocksTests(SimpleTestCase):
 
     def test_closed(self):
         _release_advisory_locks(mock.Mock(connection=mock.Mock(closed=True)))
+
+    def test_failed_transaction(self):
+        pg_connection = mock.Mock(closed=False)
+        pg_connection.info.transaction_status = psycopg.pq.TransactionStatus.INERROR
+        _release_advisory_locks(mock.Mock(connection=pg_connection))
+        pg_connection.cursor.assert_not_called()
+
+
+class FetchTests(SimpleTestCase):
+    def cursor(self, rows):
+        rows = iter(rows)
+
+        def fetchmany(size):
+            return [row for _, row in zip(range(size), rows, strict=False)]
+
+        return mock.Mock(fetchmany=fetchmany)
+
+    def test_size(self):
+        cursor = self.cursor([("x" * 300,)] * 30)
+        rows, more = _fetch(cursor, max_rows=100, max_size=1000, deadline=1e12)
+        # One row, then two more, which fit, then one, over the limit.
+        assert (len(rows), more) == (4, True)
+
+    def test_huge_first_row(self):
+        cursor = self.cursor([("x" * 2000,)] * 30)
+        rows, more = _fetch(cursor, max_rows=100, max_size=1000, deadline=1e12)
+        assert (len(rows), more) == (1, True)
+
+    def test_deadline(self):
+        cursor = self.cursor([(1,)] * 30)
+        rows, more = _fetch(cursor, max_rows=100, max_size=1000, deadline=0)
+        assert (len(rows), more) == (1, True)
+
+    def test_exact(self):
+        cursor = self.cursor([(1,)] * 10)
+        rows, more = _fetch(cursor, max_rows=100, max_size=1000, deadline=1e12)
+        assert (len(rows), more) == (10, False)
 
 
 class SQLServerTests(ServerTestCase, TestCase):
@@ -382,6 +497,31 @@ class SQLServerTests(ServerTestCase, TestCase):
             "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'"
         ) == {"columns": ["count"], "rows": [[0]]}
 
+    def test_jsonb(self):
+        assert self.query(
+            """SELECT '{"a": [1]}'::jsonb AS j, 'NaN'::numeric AS n"""
+        ) == {
+            "columns": ["j", "n"],
+            "rows": [[{"a": [1]}, "NaN"]],
+        }
+
+    def test_unloadable_value(self):
+        assert self.query("SELECT 'infinity'::date AS d") == (
+            "Query error: date too large (after year 10K): 'infinity'. Cast the"
+            " column to text to read such values."
+        )
+
+    def test_privileged_role(self):
+        # The postgres alias logs in as a superuser.
+        with pytest.raises(ImproperlyConfigured) as excinfo:
+            run_query(
+                "SELECT 1", using="postgres", max_rows=1, max_size=1000, timeout=1
+            )
+        assert str(excinfo.value).startswith(
+            "The database alias 'postgres' must log in as a role that is not a"
+            " superuser,"
+        )
+
     def test_server_error(self):
         # Errors that are not the query's fault are raised, for the server to
         # log, rather than shown to the model.
@@ -407,6 +547,7 @@ class RunQueryTransactionTests(TransactionTestCase):
                 "SELECT set_config('transaction_read_only', 'off', true)",
                 using="reader",
                 max_rows=10,
+                max_size=1000,
                 timeout=1,
             )
         assert str(excinfo.value) == (
@@ -414,7 +555,9 @@ class RunQueryTransactionTests(TransactionTestCase):
         )
 
     def test_autocommit_restored(self):
-        assert run_query("SELECT 1", using="reader", max_rows=10, timeout=1) == (
+        assert run_query(
+            "SELECT 1", using="reader", max_rows=10, max_size=1000, timeout=1
+        ) == (
             ["?column?"],
             [(1,)],
             False,

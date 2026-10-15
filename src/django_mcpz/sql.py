@@ -5,7 +5,11 @@ limited to the tables, typically views, of a list of models.
 
 from __future__ import annotations
 
+import math
+import re
+import time
 from collections.abc import Callable, Sequence
+from decimal import Decimal
 from typing import Annotated, Any
 
 import msgspec
@@ -13,7 +17,7 @@ import msgspec.json
 from django.core.exceptions import ImproperlyConfigured
 from django.db import connections, transaction
 from django.db.backends.base.base import BaseDatabaseWrapper
-from django.db.models import Field, Model
+from django.db.models import CompositePrimaryKey, Field, Model
 from django.http import HttpRequest
 from django_msgspec import enc_hook as django_enc_hook
 
@@ -21,6 +25,8 @@ from django_mcpz.server import MCPServer, ToolError
 
 try:
     import psycopg
+    import psycopg.pq
+    from psycopg.types.json import JsonbLoader
 except ImportError:  # pragma: no cover
     psycopg = None  # type: ignore[assignment]
 
@@ -48,9 +54,25 @@ _QUERY_ERROR_CLASSES = frozenset(
 _QUERY_CANCELED = "57014"
 _SYNTAX_ERROR = "42601"
 
-_ONLY_SELECT = (
-    "Only a single SELECT statement is allowed, or WITH, VALUES, or TABLE."
-)
+# Rows are fetched in batches, checking the limits between them, so a query
+# with huge values can't fill the server's memory. The first batch is one
+# row, and later ones are sized from the rows so far, up to this.
+MAX_FETCH_BATCH = 100
+
+# Checked on every query, alongside setting the timeout: the login role must
+# be a plain one, unable to read more than it was granted.
+_SETUP_SQL = """
+SELECT
+    set_config('statement_timeout', %s, true),
+    current_user <> session_user
+    OR rolsuper
+    OR rolbypassrls
+    OR EXISTS (SELECT FROM pg_auth_members WHERE member = pg_roles.oid)
+FROM pg_roles
+WHERE rolname = session_user
+"""
+
+_ONLY_SELECT = "Only a single SELECT statement is allowed, or WITH, VALUES, or TABLE."
 
 
 class SQLQueryParams(msgspec.Struct):
@@ -92,6 +114,12 @@ def add_sql_tools(
             f"add_sql_tools() needs a PostgreSQL database, but {using!r} is"
             f" {connection.vendor}."
         )
+    if connection.settings_dict["OPTIONS"].get("assume_role"):
+        raise ImproperlyConfigured(
+            f"add_sql_tools() needs {using!r} to log in as the reader role,"
+            " not use assume_role, since queries could switch back to the"
+            " login role with set_config('role', ...)."
+        )
     if psycopg is None:  # pragma: no cover
         raise ImproperlyConfigured("add_sql_tools() needs psycopg 3.")
     if not models:
@@ -104,7 +132,7 @@ def add_sql_tools(
         raise ImproperlyConfigured("timeout must be positive.")
 
     model_list = list(models)
-    tables = ", ".join(model._meta.db_table for model in model_list)
+    tables = ", ".join(quote_name(model._meta.db_table) for model in model_list)
     schema_name = f"{name_prefix}_schema"
     query_name = f"{name_prefix}_query"
 
@@ -141,28 +169,36 @@ def add_sql_tools(
     )
     def sql_query(request: HttpRequest, params: SQLQueryParams) -> msgspec.Raw:
         columns, rows, more = run_query(
-            params.sql, using=using, max_rows=max_rows, timeout=timeout
+            params.sql,
+            using=using,
+            max_rows=max_rows,
+            max_size=max_size,
+            timeout=timeout,
         )
         return encode_result(columns, rows, more=more, max_size=max_size)
 
 
 def run_query(
-    sql: str, *, using: str, max_rows: int, timeout: float
+    sql: str, *, using: str, max_rows: int, max_size: int, timeout: float
 ) -> tuple[list[str], list[tuple[Any, ...]], bool]:
     """
     Run a query in a read-only transaction, returning the column names, up to
-    max_rows rows, and whether more rows were left unfetched.
+    max_rows rows, and whether rows were left unfetched.
 
     The query runs through a server-side cursor, so PostgreSQL wraps it as
     DECLARE ... CURSOR FOR <sql>, sent with the extended query protocol. That
     accepts exactly one statement, which must be a query: no data-modifying
-    statements, even in a WITH clause, and no transaction control. Rows are
-    fetched only up to the limit, so a large result is never transferred.
+    statements, even in a WITH clause, and no transaction control.
+
+    Rows are fetched in batches, stopping at max_rows, once roughly max_size
+    bytes of values have arrived, or once the timeout has passed, since each
+    FETCH gets its own statement timeout.
     """
     connection = connections[using]
     sql = sql.strip().rstrip(";").rstrip()
     if not sql:
         raise ToolError("The SQL is empty.")
+    deadline = time.monotonic() + timeout
     try:
         with transaction.atomic(using=using):
             # Never commit: there is nothing to commit, and anything that
@@ -173,33 +209,73 @@ def run_query(
             pg_connection = connection.connection
             with pg_connection.cursor() as cursor:
                 cursor.execute("SET TRANSACTION READ ONLY")
-                cursor.execute(
-                    "SELECT set_config('statement_timeout', %s, true)",
-                    [f"{int(timeout * 1000)}ms"],
+                cursor.execute(_SETUP_SQL, [f"{max(1, int(timeout * 1000))}ms"])
+                privileged = cursor.fetchone()[1]
+            if privileged:
+                raise ImproperlyConfigured(
+                    f"The database alias {using!r} must log in as a role that"
+                    " is not a superuser, cannot bypass row-level security,"
+                    " and is not a member of other roles, or queries could"
+                    " read beyond the role's grants."
                 )
             with psycopg.ServerCursor(pg_connection, CURSOR_NAME) as cursor:
+                # Django loads jsonb as text, for JSONField. Load it as JSON
+                # here, so it's nested JSON in results.
+                cursor.adapters.register_loader("jsonb", JsonbLoader)
                 # A newline ends any trailing -- comment, before the rest of
                 # the statement psycopg sends.
                 cursor.execute(f"{sql}\n")
                 assert cursor.description is not None
                 columns = [column.name for column in cursor.description]
-                rows = cursor.fetchmany(max_rows + 1)
+                rows, more = _fetch(cursor, max_rows, max_size, deadline)
     except psycopg.Error as exc:
         raise _query_error(exc, sql, timeout) from None
     finally:
         _release_advisory_locks(connection)
-    return columns, rows[:max_rows], len(rows) > max_rows
+    return columns, rows, more
+
+
+def _fetch(
+    cursor: psycopg.ServerCursor[Any], max_rows: int, max_size: int, deadline: float
+) -> tuple[list[tuple[Any, ...]], bool]:
+    rows: list[tuple[Any, ...]] = []
+    size = 0
+    batch_size = 1
+    while True:
+        batch = cursor.fetchmany(min(batch_size, max_rows + 1 - len(rows)))
+        rows.extend(batch)
+        if len(rows) > max_rows:
+            return rows[:max_rows], True
+        if not batch:
+            return rows, False
+        size += sum(_rough_size(value) for row in batch for value in row)
+        if size > max_size or time.monotonic() > deadline:
+            # Probably more, which would cost a FETCH to find out.
+            return rows, True
+        # As many rows as probably fit in what's left of max_size.
+        row_size = size // len(rows) + 1
+        batch_size = max(1, min(MAX_FETCH_BATCH, (max_size - size) // row_size))
+
+
+def _rough_size(value: Any) -> int:
+    if isinstance(value, (str, bytes)):
+        return len(value)
+    return 8
 
 
 def _release_advisory_locks(connection: BaseDatabaseWrapper) -> None:
     """
     Release session-level advisory locks the query took, with functions like
-    pg_advisory_lock(). Unlike everything else a query can do in a read-only
-    transaction, they outlast the rollback, and would be held by the
-    connection for later requests.
+    pg_advisory_lock(). Unlike settings, they outlast the rollback, and would
+    be held by the connection for later requests.
     """
     pg_connection = connection.connection
-    if pg_connection is None or pg_connection.closed:
+    if (
+        pg_connection is None
+        or pg_connection.closed
+        # In an outer transaction, which failed.
+        or pg_connection.info.transaction_status == psycopg.pq.TransactionStatus.INERROR
+    ):
         return
     with pg_connection.cursor() as cursor:
         cursor.execute("SELECT pg_advisory_unlock_all()")
@@ -212,6 +288,11 @@ def _query_error(exc: psycopg.Error, sql: str, timeout: float) -> Exception:
             f"The query was cancelled after running for {timeout:g} seconds."
             " Make it cheaper, for example by filtering earlier or"
             " aggregating less data."
+        )
+    if sqlstate is None and isinstance(exc, psycopg.DataError):
+        # A value psycopg can't load, such as an infinite or BC date.
+        return ToolError(
+            f"Query error: {exc}. Cast the column to text to read such values."
         )
     if sqlstate is None or sqlstate[:2] not in _QUERY_ERROR_CLASSES:
         return exc
@@ -269,22 +350,18 @@ def encode_result(
     which is unambiguous about types and nulls, yet nearly as compact as CSV.
 
     The result is kept to roughly max_size bytes, so it fits in a model's
-    context: strings longer than a tenth of that are shortened, and rows that
+    context: long values are shortened to a fair share of it, and rows that
     do not fit are dropped, with a note saying so.
     """
-    max_value = max_size // 10
+    max_value = max_size // max(10, len(columns))
     budget = max_size - len(_encoder.encode(columns)) - 200
     kept: list[list[Any]] = []
     shortened = False
     for row in rows:
         values = []
         for value in row:
-            if isinstance(value, str) and len(value) > max_value:
-                value = (
-                    f"{value[:max_value]}… [{len(value) - max_value} more"
-                    " characters]"
-                )
-                shortened = True
+            value, was_shortened = _shorten(_finite(value), max_value)
+            shortened = shortened or was_shortened
             values.append(value)
         budget -= len(_encoder.encode(values)) + 1
         if budget < 0 and kept:
@@ -300,14 +377,39 @@ def encode_result(
         )
     if shortened:
         notes.append(
-            "Long text values were shortened. Select substr() of them to read"
-            " specific parts."
+            "Long values were shortened. Select parts of them, such as with"
+            " substr(), to read more."
         )
     if notes:
         result["truncated"] = True
         result["note"] = " ".join(notes)
     # Encoded here, rather than by the server, for decimals as numbers.
     return msgspec.Raw(_encoder.encode(result))
+
+
+def _finite(value: Any) -> Any:
+    """
+    NaN and infinities as strings, since JSON has no numbers for them.
+    msgspec would encode float ones as null, and decimal ones as invalid JSON.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(Decimal(value))
+    if isinstance(value, Decimal) and not value.is_finite():
+        return str(value)
+    return value
+
+
+def _shorten(value: Any, max_value: int) -> tuple[Any, bool]:
+    if isinstance(value, str):
+        text = value
+    elif value is None or isinstance(value, (bool, int, float, Decimal)):
+        return value, False
+    else:
+        # Arrays, JSON, bytes, and so on, by their encoded size.
+        text = _encoder.encode(value).decode()
+    if len(text) <= max_value:
+        return value, False
+    return f"{text[:max_value]}… [{len(text) - max_value} more characters]", True
 
 
 # Schema description
@@ -348,18 +450,29 @@ def _describe_model(
     description = opts.db_table_comment or _docstring(model)
     if description:
         lines.append(_comment(description))
-    lines.append(f"CREATE TABLE {opts.db_table} (")
+    lines.append(f"CREATE TABLE {quote_name(opts.db_table)} (")
     columns = []
-    for field in opts.concrete_fields:
-        column = f"  {field.column} {_db_type(field, connection)}"
+    # Local fields, since a multi-table inheritance child's table holds only
+    # its own, plus the link to its parent.
+    for field in opts.local_concrete_fields:
+        db_type = _db_type(field, connection)
+        if db_type is None:
+            continue
+        column = f"  {_quote_column(field)} {db_type}"
         if not field.null:
             column += " NOT NULL"
         if field.primary_key:
             column += " PRIMARY KEY"
         if field.is_relation and field.related_model._meta.db_table in tables:  # type: ignore[union-attr]
             target = field.target_field  # type: ignore[attr-defined]
-            column += f" REFERENCES {target.model._meta.db_table} ({target.column})"
+            column += (
+                f" REFERENCES {quote_name(target.model._meta.db_table)}"
+                f" ({_quote_column(target)})"
+            )
         columns.append((column, _field_notes(field)))
+    if isinstance(opts.pk, CompositePrimaryKey):
+        pk_columns = ", ".join(_quote_column(field) for field in opts.pk.fields)
+        columns.append((f"  PRIMARY KEY ({pk_columns})", ""))
     for i, (column, notes) in enumerate(columns):
         if i < len(columns) - 1:
             column += ","
@@ -370,10 +483,14 @@ def _describe_model(
     return "\n".join(lines)
 
 
-def _db_type(field: Field[Any, Any], connection: BaseDatabaseWrapper) -> str:
+def _quote_column(field: Any) -> str:
+    return quote_name(field.column)
+
+
+def _db_type(field: Field[Any, Any], connection: BaseDatabaseWrapper) -> str | None:
     if field.is_relation:
-        return str(field.target_field.rel_db_type(connection))  # type: ignore[attr-defined]
-    return str(field.db_type(connection))
+        return field.target_field.rel_db_type(connection)  # type: ignore[attr-defined,no-any-return]
+    return field.db_type(connection)
 
 
 def _docstring(model: type[Model]) -> str:
@@ -388,7 +505,7 @@ def _docstring(model: type[Model]) -> str:
 def _field_notes(field: Field[Any, Any]) -> str:
     notes = []
     verbose_name = str(field.verbose_name)
-    if verbose_name.lower() != field.name.replace("_", " ").lower():
+    if verbose_name and verbose_name.lower() != field.name.replace("_", " ").lower():
         notes.append(verbose_name[0].upper() + verbose_name[1:] + ".")
     description = field.db_comment or str(field.help_text)
     if description:
@@ -409,3 +526,122 @@ def _sql_literal(value: Any) -> str:
 
 def _comment(text: str) -> str:
     return "\n".join(f"-- {line}".rstrip() for line in text.strip().splitlines())
+
+
+# PostgreSQL's reserved key words, which can't be identifiers unquoted.
+_RESERVED = frozenset(
+    [
+        "all",
+        "analyse",
+        "analyze",
+        "and",
+        "any",
+        "array",
+        "as",
+        "asc",
+        "asymmetric",
+        "authorization",
+        "binary",
+        "both",
+        "case",
+        "cast",
+        "check",
+        "collate",
+        "collation",
+        "column",
+        "concurrently",
+        "constraint",
+        "create",
+        "cross",
+        "current_catalog",
+        "current_date",
+        "current_role",
+        "current_schema",
+        "current_time",
+        "current_timestamp",
+        "current_user",
+        "default",
+        "deferrable",
+        "desc",
+        "distinct",
+        "do",
+        "else",
+        "end",
+        "except",
+        "false",
+        "fetch",
+        "for",
+        "foreign",
+        "freeze",
+        "from",
+        "full",
+        "grant",
+        "group",
+        "having",
+        "ilike",
+        "in",
+        "initially",
+        "inner",
+        "intersect",
+        "into",
+        "is",
+        "isnull",
+        "join",
+        "lateral",
+        "leading",
+        "left",
+        "like",
+        "limit",
+        "localtime",
+        "localtimestamp",
+        "natural",
+        "not",
+        "notnull",
+        "null",
+        "offset",
+        "on",
+        "only",
+        "or",
+        "order",
+        "outer",
+        "overlaps",
+        "placing",
+        "primary",
+        "references",
+        "returning",
+        "right",
+        "select",
+        "session_user",
+        "similar",
+        "some",
+        "symmetric",
+        "system_user",
+        "table",
+        "tablesample",
+        "then",
+        "to",
+        "trailing",
+        "true",
+        "union",
+        "unique",
+        "user",
+        "using",
+        "variadic",
+        "verbose",
+        "when",
+        "where",
+        "window",
+        "with",
+    ]
+)
+_PLAIN_IDENTIFIER = re.compile(r"[a-z_][a-z0-9_$]*")
+
+
+def quote_name(name: str) -> str:
+    """
+    Quote an identifier only when it needs quoting, keeping the schema
+    readable, and the model's SQL natural.
+    """
+    if _PLAIN_IDENTIFIER.fullmatch(name) and name not in _RESERVED:
+        return name
+    return '"' + name.replace('"', '""') + '"'
