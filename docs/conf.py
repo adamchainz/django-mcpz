@@ -37,6 +37,7 @@ release = version
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
+    "sphinx.ext.intersphinx",
     "sphinx.ext.viewcode",
     "sphinx_copybutton",
 ]
@@ -83,6 +84,15 @@ latex_documents = [
         "manual",
     ),
 ]
+
+# -- Options for Intersphinx -------------------------------------------
+
+intersphinx_mapping = {
+    "django": (
+        "https://docs.djangoproject.com/en/stable/",
+        "https://docs.djangoproject.com/en/stable/_objects/",
+    ),
+}
 
 
 def setup(app: Any) -> None:
