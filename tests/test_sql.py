@@ -24,8 +24,18 @@ from django_mcpz.sql import (
     encode_result,
     list_tables,
     run_query,
+    sync_sql_grants,
 )
-from tests.models import Child, Pair, Part, Reserved, Undocumented, WidgetView
+from tests.models import (
+    Child,
+    Pair,
+    Part,
+    Reserved,
+    Undocumented,
+    WidgetName,
+    WidgetPrice,
+    WidgetView,
+)
 from tests.test_server import ServerTestCase, make_message
 
 TABLES = """\
@@ -606,6 +616,31 @@ class RunQueryTransactionTests(TransactionTestCase):
             "Query error: transaction read-write mode must be set before any query"
         )
 
+    def test_table_columns(self):
+        # Granted some columns of a table, the reader can read just those.
+        sync_sql_grants(models=[WidgetName], reader="reader", using="postgres")
+        try:
+            assert run_query(
+                "SELECT name FROM tests_widget ORDER BY name",
+                using="reader",
+                max_rows=10,
+                max_size=1000,
+                timeout=1,
+            ) == (["name"], [("Doohickey",), ("Gizmo",), ("Sprocket",)], False)
+            with pytest.raises(ToolError) as excinfo:
+                run_query(
+                    "SELECT price FROM tests_widget",
+                    using="reader",
+                    max_rows=10,
+                    max_size=1000,
+                    timeout=1,
+                )
+            assert str(excinfo.value) == (
+                "Query error: permission denied for table tests_widget"
+            )
+        finally:
+            sync_sql_grants(models=[WidgetView], reader="reader", using="postgres")
+
     def test_autocommit_restored(self):
         assert run_query(
             "SELECT 1", using="reader", max_rows=10, max_size=1000, timeout=1
@@ -617,3 +652,120 @@ class RunQueryTransactionTests(TransactionTestCase):
         connection = connections["reader"]
         assert connection.get_autocommit()
         assert not connection.in_atomic_block
+
+
+class SyncSQLGrantsTests(TestCase):
+    databases = {"postgres"}
+
+    def fetch(self, sql, params=None):
+        with connections["postgres"].cursor() as cursor:
+            cursor.execute(sql, params)
+            return cursor.fetchone()
+
+    def column_privileges(self, table):
+        return {
+            column: self.fetch(
+                "SELECT has_column_privilege('mcpz_test_reader', %s, %s, 'SELECT')",
+                [table, column],
+            )[0]
+            for column in ["id", "name", "price", "in_stock"]
+        }
+
+    def table_privilege(self, table):
+        return self.fetch(
+            "SELECT has_table_privilege('mcpz_test_reader', %s, 'SELECT')", [table]
+        )[0]
+
+    def any_column_privilege(self, role, table):
+        return self.fetch(
+            "SELECT has_any_column_privilege(%s, %s, 'SELECT')", [role, table]
+        )[0]
+
+    def test_view(self):
+        # As done by the post_migrate handler in tests.apps. Grants are per
+        # column, so not on the table as a whole.
+        sync_sql_grants(models=[WidgetView], reader="reader", using="postgres")
+        assert self.any_column_privilege("mcpz_test_reader", "tests_widget_view")
+        assert not self.table_privilege("tests_widget_view")
+        assert not self.table_privilege("tests_widget")
+        assert self.column_privileges("tests_widget") == {
+            "id": False,
+            "name": False,
+            "price": False,
+            "in_stock": False,
+        }
+
+    def test_columns(self):
+        # Columns of models sharing a table are merged, skipping any field
+        # without a column, and anything else is revoked.
+        sync_sql_grants(
+            models=[WidgetName, WidgetPrice], reader="reader", using="postgres"
+        )
+        assert self.column_privileges("tests_widget") == {
+            "id": True,
+            "name": True,
+            "price": True,
+            "in_stock": False,
+        }
+        assert not self.table_privilege("tests_widget")
+        assert not self.any_column_privilege("mcpz_test_reader", "tests_widget_view")
+
+    def test_revokes_stale_grants(self):
+        with connections["postgres"].cursor() as cursor:
+            cursor.execute("GRANT SELECT ON tests_widget TO mcpz_test_reader")
+            cursor.execute(
+                "GRANT SELECT (in_stock) ON tests_widget TO mcpz_test_reader"
+            )
+        sync_sql_grants(models=[WidgetName], reader="reader", using="postgres")
+        assert not self.table_privilege("tests_widget")
+        assert self.column_privileges("tests_widget") == {
+            "id": True,
+            "name": True,
+            "price": False,
+            "in_stock": False,
+        }
+
+    def test_creates_role(self):
+        with mock.patch.dict(
+            connections["reader"].settings_dict,
+            {"USER": "mcpz_test_new", "PASSWORD": "secret"},
+        ):
+            sync_sql_grants(models=[WidgetView], reader="reader", using="postgres")
+        assert self.fetch(
+            "SELECT rolcanlogin, rolsuper FROM pg_roles WHERE rolname = %s",
+            ["mcpz_test_new"],
+        ) == (True, False)
+        assert self.any_column_privilege("mcpz_test_new", "tests_widget_view")
+
+    def test_not_postgresql(self):
+        with pytest.raises(ImproperlyConfigured) as excinfo:
+            sync_sql_grants(models=[WidgetView], reader="reader", using="default")
+        assert str(excinfo.value) == (
+            "sync_sql_grants() needs a PostgreSQL database, but 'default' is sqlite."
+        )
+
+    def test_no_user(self):
+        with (
+            mock.patch.dict(connections["reader"].settings_dict, {"USER": ""}),
+            pytest.raises(ImproperlyConfigured) as excinfo,
+        ):
+            sync_sql_grants(models=[WidgetView], reader="reader", using="postgres")
+        assert str(excinfo.value) == (
+            "sync_sql_grants() needs the 'reader' database alias to set USER, the"
+            " role it logs in as."
+        )
+
+    def test_same_user(self):
+        with pytest.raises(ImproperlyConfigured) as excinfo:
+            sync_sql_grants(models=[WidgetView], reader="postgres", using="postgres")
+        assert str(excinfo.value).startswith(
+            "The 'postgres' and 'postgres' database aliases log in as the same role,"
+        )
+
+    def test_missing_table(self):
+        with pytest.raises(ImproperlyConfigured) as excinfo:
+            sync_sql_grants(models=[Undocumented], reader="reader", using="postgres")
+        assert str(excinfo.value) == (
+            "sync_sql_grants() can't find the table 'tests_undocumented'. Create"
+            " it, or its view, in a migration."
+        )

@@ -8,8 +8,8 @@ The whole example project schema and data:
   weekends are busier, and phone orders are dwindling as AI assistants take
   over.
 * The views behind the MenuItem and OrderLine models, for the SQL tools. On
-  PostgreSQL, also the mcpizza_reader role that the tools connect as,
-  allowed to SELECT from those views and nothing else.
+  PostgreSQL, the post_migrate handler in pizzeria.apps then maintains the
+  role that reads them.
 """
 
 from __future__ import annotations
@@ -235,38 +235,6 @@ VIEWS = [
     ),
 ]
 
-# A local demo password. For a real deployment, create the role outside of
-# migrations and keep its password with your other secrets.
-CREATE_ROLE = """
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mcpizza_reader') THEN
-        CREATE ROLE mcpizza_reader LOGIN PASSWORD 'mcpizza';
-    END IF;
-END
-$$;
-"""
-
-
-def create_role(apps, schema_editor):
-    if schema_editor.connection.vendor != "postgresql":
-        return
-    quote = schema_editor.quote_name
-    database = quote(schema_editor.connection.settings_dict["NAME"])
-    schema_editor.execute(CREATE_ROLE)
-    schema_editor.execute(f"GRANT CONNECT ON DATABASE {database} TO mcpizza_reader")
-    schema_editor.execute("GRANT USAGE ON SCHEMA public TO mcpizza_reader")
-    for name, _ in VIEWS:
-        schema_editor.execute(f"GRANT SELECT ON {quote(name)} TO mcpizza_reader")
-
-
-def drop_role(apps, schema_editor):
-    if schema_editor.connection.vendor != "postgresql":
-        return
-    database = schema_editor.quote_name(schema_editor.connection.settings_dict["NAME"])
-    schema_editor.execute("REVOKE USAGE ON SCHEMA public FROM mcpizza_reader")
-    schema_editor.execute(f"REVOKE CONNECT ON DATABASE {database} FROM mcpizza_reader")
-
 
 class Migration(migrations.Migration):
     initial = True
@@ -418,5 +386,4 @@ class Migration(migrations.Migration):
             )
             for name, query in VIEWS
         ),
-        migrations.RunPython(create_role, drop_role),
     ]
