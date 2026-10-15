@@ -9,6 +9,7 @@ django-mcpz documentation
 
    installation
    servers
+   sql
    oauth
    bearer_tokens
    api

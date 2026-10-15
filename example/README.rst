@@ -14,6 +14,8 @@ The important code lives in these files:
 * ``pizzeria/mcp.py``: the MCP server and tools, in the app’s ``mcp`` module, following the `django-mcpz convention <https://django-mcpz.readthedocs.io/en/latest/servers.html>`__.
 * ``pizzeria/views.py`` and ``pizzeria/templates/pizzeria/menu.html``: the menu web page that the ``menu_link`` tool points at.
 * ``pizzeria/static/pizzeria/icon.svg``: the server’s icon, which clients show alongside its title.
+* ``pizzeria/migrations/0004_order_history.py``: the migration that seeds three months of orders, for reporting on.
+* ``pizzeria/migrations/0005_report_views.py``: the migration that creates the views for the SQL tools, plus, on PostgreSQL, the role that reads them.
 
 The included tools are:
 
@@ -33,6 +35,9 @@ The included tools are:
 
 * ``menu_link``: a link to the menu web page for a date, past or future, for the user to open in a browser.
 
+* ``sql_schema`` and ``sql_query``: ad hoc reporting with SQL, over read-only views of the menu and three months of orders, with `the SQL tools <https://django-mcpz.readthedocs.io/en/latest/sql.html>`__.
+  These need PostgreSQL, so only appear when you set it up, as below.
+
 Setup
 -----
 
@@ -51,6 +56,57 @@ This example is unauthenticated (``auth=public``) and served on localhost only, 
 See the `authentication docs <https://django-mcpz.readthedocs.io/en/latest/servers.html#authentication>`__ for adding auth.
 
 Once the server is running, any MCP client should be able to connect.
+
+PostgreSQL and the SQL tools
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To try the SQL tools, use PostgreSQL instead of SQLite, by setting the ``MCPIZZA_POSTGRES`` environment variable.
+Create a database called ``mcpizza``, then migrate and run the server with the variable set:
+
+.. code-block:: sh
+
+    createdb mcpizza
+    export MCPIZZA_POSTGRES=1
+    uv run --group example manage.py migrate
+    uv run --group example manage.py runserver
+
+The ``PGHOST``, ``PGUSER``, and ``PGPASSWORD`` environment variables configure the connection, defaulting to ``localhost`` and your local user.
+The user needs permission to create roles, as migrations create ``mcpizza_reader``, the role the SQL tools connect as, through the ``reader`` database alias.
+It may only read the two report views, not the tables behind them.
+
+Then ask a question the other tools can’t answer:
+
+.. code-block:: sh
+
+    claude --mcp-config mcp.json --strict-mcp-config --allowedTools "mcp__mcpizza__*" \
+      -p "How has the share of orders coming from AI assistants changed month by month? Give me a small table."
+
+Example output, after the model called ``sql_schema`` then ``sql_query`` once:
+
+.. code-block:: text
+
+    The share of orders placed through AI assistants (the `mcp` channel) has risen every month:
+
+    | Month | Total orders | AI assistant orders | Share |
+    |---|---|---|---|
+    | Jul 2026 | 206 | 25 | 12.1% |
+    | Aug 2026 | 478 | 85 | 17.8% |
+    | Sep 2026 | 443 | 130 | 29.3% |
+    | Oct 2026 (to 15th) | 224 | 89 | 39.7% |
+
+    The share has more than tripled since July. October covers only the first half of the month, so its share may shift by month end.
+
+The query it wrote:
+
+.. code-block:: sql
+
+    select to_char(date_trunc('month', placed_at),'YYYY-MM') as month,
+      count(*) as orders,
+      count(*) filter (where channel='mcp') as mcp_orders,
+      round(100.0*count(*) filter (where channel='mcp')/count(*),1) as mcp_pct
+    from pizzeria_report_order_line group by 1 order by 1
+
+Ask about the customers’ requests, and the model can only say how many orders had them, since the view leaves out their text.
 
 Test with ``llm``
 -----------------

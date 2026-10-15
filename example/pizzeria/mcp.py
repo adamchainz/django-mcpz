@@ -5,6 +5,7 @@ import io
 from typing import Annotated, Any
 
 import msgspec
+from django.conf import settings
 from django.db.models import Sum
 from django.http import HttpRequest
 from django.urls import reverse
@@ -22,7 +23,8 @@ from django_mcpz.server import (
     elicit,
     public,
 )
-from pizzeria.models import Order, Pizza
+from django_mcpz.sql import add_sql_tools
+from pizzeria.models import MenuItem, Order, OrderLine, Pizza
 
 server = MCPServer(
     name="mcpizza",
@@ -148,6 +150,7 @@ def place_order(request: HttpRequest, params: PlaceOrderParams) -> dict[str, Any
         quantity=params.quantity,
         requests=params.requests,
         total=pizza.price * params.quantity,
+        channel="mcp",
     )
     return {
         "order_id": order.id,
@@ -295,4 +298,15 @@ def menu_link(request: HttpRequest, params: MenuLinkParams) -> ResourceLink:
         uri=request.build_absolute_uri(reverse("menu", args=[on_date])),
         name=f"MCPizza menu for {on_date.isoformat()}",
         mime_type="text/html",
+    )
+
+
+if "reader" in settings.DATABASES:
+    # Ad hoc reporting over the read-only views, for questions the other tools
+    # don't answer, like "which pizza sold best last month?"
+    add_sql_tools(
+        server,
+        models=[MenuItem, OrderLine],
+        using="reader",
+        context="MCPizza's sales data. Prices and totals are in pounds (GBP).",
     )

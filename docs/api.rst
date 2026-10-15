@@ -332,6 +332,54 @@ For typed input schemas, whether annotated or passed explicitly as ``input_schem
   .. |msgspec.Meta| replace:: ``msgspec.Meta``
   __ https://msgspec.dev/constraints
 
+.. _api-sql:
+
+SQL queries
+-----------
+
+.. currentmodule:: django_mcpz.sql
+
+As covered in :doc:`sql`.
+
+.. function:: add_sql_tools(server, *, models, using, context=None, max_rows=100, max_size=50000, timeout=5.0, name_prefix="sql", permission=None)
+
+    Add two tools to ``server``: ``<name_prefix>_schema``, describing the tables of ``models``, and ``<name_prefix>_query``, running one read-only PostgreSQL query against them.
+
+    :param server:
+        The :class:`~django_mcpz.server.MCPServer` to add the tools to.
+
+    :param models:
+        The models whose tables the model may query, typically unmanaged models for views.
+        Their documentation drives the schema tool.
+        They don’t restrict queries, which is the job of the database role.
+
+    :param using:
+        The alias of the database connection to run queries on, which must be PostgreSQL, connecting with psycopg 3, as a role that can only read the tables of ``models``.
+
+    :param context:
+        Optional text shown at the top of the schema, for anything that applies across tables.
+
+    :param max_rows:
+        The most rows a query returns.
+        The model is told the limit and when it was hit.
+
+    :param max_size:
+        Roughly the most bytes of JSON a query returns, so results fit in the model’s context.
+        Rows beyond it are left out, and text values longer than a tenth of it are shortened.
+
+    :param timeout:
+        The statement timeout for queries, in seconds.
+
+    :param name_prefix:
+        The prefix for the tools’ names, for adding sets of tools for several databases to one server.
+
+    :param permission:
+        An optional permission for both tools, as for :meth:`~django_mcpz.server.MCPServer.tool`.
+
+    Raises ``ImproperlyConfigured`` if the database isn’t PostgreSQL, ``models`` is empty, or a limit is out of range.
+
+.. currentmodule:: django_mcpz.server
+
 .. _api-logging:
 
 Log records

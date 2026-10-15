@@ -13,6 +13,7 @@ from tests.mcp import (
     perms_server,
     secure_server,
     server,
+    sql_server,
     strict_server,
 )
 
@@ -27,6 +28,7 @@ urlpatterns = [
     path("strict-mcp", strict_server),
     path("bearer-tokens-mcp", bearer_tokens_server),
     path("oauth-mcp", oauth_server),
+    path("sql-mcp", sql_server),
     path("admin/", admin.site.urls),
     path("oauth/", include("django_mcpz.oauth.urls")),
     path("", include("django_mcpz.oauth.wellknown")),

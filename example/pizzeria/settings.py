@@ -48,6 +48,30 @@ DATABASES: dict[str, dict[str, Any]] = {
     }
 }
 
+# Set MCPIZZA_POSTGRES=1 to use PostgreSQL instead, which also enables the
+# SQL tools. They connect through the "reader" alias, as the mcpizza_reader
+# role that migrations create, which may only read the report views.
+if os.environ.get("MCPIZZA_POSTGRES"):
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": "mcpizza",
+            "HOST": os.environ.get("PGHOST", "localhost"),
+            "USER": os.environ.get("PGUSER", ""),
+            "PASSWORD": os.environ.get("PGPASSWORD", ""),
+        },
+        "reader": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": "mcpizza",
+            "HOST": os.environ.get("PGHOST", "localhost"),
+            "USER": "mcpizza_reader",
+            "PASSWORD": "mcpizza",
+            # Tests use the default connection, rather than a test database
+            # for this alias.
+            "TEST": {"MIRROR": "default"},
+        },
+    }
+
 USE_TZ = True
 
 WSGI_APPLICATION = "pizzeria.wsgi.application"

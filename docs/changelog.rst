@@ -10,6 +10,9 @@ Unreleased
 * Document the convention of defining MCP servers in an ``mcp`` module of an app, an ``mcp.py`` file or ``mcp`` package, alongside its ``models.py`` and ``admin.py``.
   See :doc:`servers`.
 
+* Add ``django_mcpz.sql.add_sql_tools()``, which adds tools letting a model run read-only SQL queries against chosen PostgreSQL views, plus describe them.
+  See :doc:`sql`.
+
 1.1.0 (2026-10-02)
 ------------------
 

@@ -22,7 +22,8 @@ from django_mcpz.server import (
     elicit,
     public,
 )
-from tests.models import Widget
+from django_mcpz.sql import add_sql_tools
+from tests.models import Widget, WidgetView
 
 server = MCPServer(
     name="example-server",
@@ -573,3 +574,14 @@ bearer_elicitation_server = MCPServer(
 bearer_elicitation_server.tool(
     description="Ask for confirmation, as the calling user."
 )(confirm_as_user)
+
+
+sql_server = MCPServer(name="sql-server", version="1.0.0", auth=public)
+add_sql_tools(
+    sql_server,
+    models=[WidgetView],
+    using="reader",
+    context="Test widgets.",
+    max_rows=2,
+    timeout=1,
+)

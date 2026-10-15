@@ -1,16 +1,37 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
 SECRET_KEY = "NOTASECRET"
 
 ALLOWED_HOSTS: list[str] = []
 
+# PostgreSQL, for the SQL tools, is used only by the tests that need it.
+POSTGRES: dict[str, Any] = {
+    "ENGINE": "django.db.backends.postgresql",
+    "NAME": "mcpz",
+    "HOST": os.environ.get("PGHOST", "localhost"),
+    "PORT": os.environ.get("PGPORT", "5432"),
+    "USER": os.environ.get("PGUSER", "postgres"),
+    "PASSWORD": os.environ.get("PGPASSWORD", "postgres"),
+    # Set up without the default database, for tests that use only these.
+    "TEST": {"DEPENDENCIES": []},
+}
+
 DATABASES: dict[str, dict[str, Any]] = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": ":memory:",
-    }
+    },
+    "postgres": POSTGRES,
+    # The same test database, as the role created by migration 0002, which
+    # may only read the tests_widget_view view.
+    "reader": {
+        **POSTGRES,
+        "USER": "mcpz_test_reader",
+        "PASSWORD": "mcpz_test_reader",
+    },
 }
 
 INSTALLED_APPS = [
@@ -51,3 +72,6 @@ ROOT_URLCONF = "tests.urls"
 
 USE_TZ = True
 STATIC_URL = "static/"
+
+# Part uses db_table_comment, to test describing it, which SQLite ignores.
+SILENCED_SYSTEM_CHECKS = ["models.W046"]
