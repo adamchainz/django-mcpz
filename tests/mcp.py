@@ -22,8 +22,9 @@ from django_mcpz.server import (
     elicit,
     public,
 )
+from django_mcpz.sql.readers import SQLReader
 from django_mcpz.sql.tools import add_sql_tools
-from tests.models import Widget
+from tests.models import Widget, WidgetView
 
 server = MCPServer(
     name="example-server",
@@ -577,9 +578,15 @@ bearer_elicitation_server.tool(
 
 
 sql_server = MCPServer(name="sql-server", version="1.0.0", auth=public)
+# The reader alias's role may read these columns, and nothing else.
+sql_reader = SQLReader(
+    using="reader",
+    grantor="postgres",
+    tables={WidgetView: ["id", "name", "price"]},
+)
 add_sql_tools(
     sql_server,
-    reader="reader",
+    reader=sql_reader,
     context="Test widgets.",
     max_rows=2,
     timeout=1,

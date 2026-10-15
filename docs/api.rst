@@ -349,8 +349,8 @@ As covered in :doc:`sql`.
         The :class:`~django_mcpz.server.MCPServer` to add the tools to.
 
     :param reader:
-        The database alias to run queries on, which must be a key of :setting:`MCPZ_SQL_READERS`, listing the columns it can read.
-        It must be PostgreSQL, connecting with psycopg 3, as the reader role that the ``django_mcpz.sql`` app maintains.
+        The :class:`~django_mcpz.sql.readers.SQLReader` to run queries as, through its database alias, listing the columns it can read.
+        The alias must be PostgreSQL, connecting with psycopg 3, as the reader role that the ``django_mcpz.sql`` app maintains.
 
     :param context:
         Optional text shown at the top of the table list, for anything that applies across tables.
@@ -375,7 +375,29 @@ As covered in :doc:`sql`.
     :param permission:
         An optional permission for both tools, as for :meth:`~django_mcpz.server.MCPServer.tool`.
 
-    Raises ``ImproperlyConfigured`` if the ``django_mcpz.sql`` app isn’t installed, the database isn’t PostgreSQL, the reader isn’t in :setting:`MCPZ_SQL_READERS` or its configuration is invalid, or a limit is out of range.
+    Raises ``ImproperlyConfigured`` if the ``django_mcpz.sql`` app isn’t installed, the reader’s database isn’t PostgreSQL, or a limit is out of range.
+
+.. currentmodule:: django_mcpz.sql.readers
+
+.. class:: SQLReader(*, tables, using="default", grantor="default")
+
+    A read-only database role for the SQL tools, as covered in :doc:`sql`.
+    After every ``migrate``, the ``django_mcpz.sql`` app makes the role able to ``SELECT`` exactly the listed columns, and nothing else, finding readers by importing the URLconf.
+
+    :param tables:
+        The columns the role can read, as a dict of models, for tables or views, to lists of the names of the fields to expose, such as ``{Order: ["id", "pizza_id", "quantity"]}``.
+        Fields can be named by their name or attribute name, and must be columns of the model’s own table.
+        The models’ and fields’ documentation drives the schema tool.
+
+    :param using:
+        The database alias that logs in as the role, which the tools query through.
+
+    :param grantor:
+        The database alias whose role creates and grants to the reader’s role, after that alias is migrated.
+
+    Raises ``ImproperlyConfigured`` if an alias isn’t in ``DATABASES``, ``using`` and ``grantor`` are the same, ``tables`` names a field that isn’t a column, or another reader for the same alias lists different columns.
+
+    Readers are immutable.
 
 .. currentmodule:: django_mcpz.server
 

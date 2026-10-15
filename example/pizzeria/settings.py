@@ -52,8 +52,8 @@ DATABASES: dict[str, dict[str, Any]] = {
 # Set MCPIZZA_POSTGRES=1 to use PostgreSQL instead, as run by compose.yaml in
 # the repository root, which also enables the SQL tools. They connect through
 # the "reader" alias, as the mcpizza_reader role, which django_mcpz.sql
-# creates after migrating, and allows to read only the columns listed in
-# MCPZ_SQL_READERS.
+# creates after migrating, and allows to read only the columns listed by the
+# SQLReader in pizzeria/mcp.py.
 if os.environ.get("MCPIZZA_POSTGRES"):
     POSTGRES = {
         "ENGINE": "django.db.backends.postgresql",
@@ -69,29 +69,6 @@ if os.environ.get("MCPIZZA_POSTGRES"):
             "PASSWORD": "mcpizza",
             # In tests, connect to the default alias's test database.
             "TEST": {"MIRROR": "default"},
-        },
-    }
-    MCPZ_SQL_READERS = {
-        "reader": {
-            "tables": {
-                "pizzeria.MenuItem": [
-                    "id",
-                    "name",
-                    "price",
-                    "vegetarian",
-                    "available_from",
-                    "available_until",
-                ],
-                "pizzeria.OrderLine": [
-                    "id",
-                    "pizza_id",
-                    "quantity",
-                    "total",
-                    "placed_at",
-                    "has_requests",
-                    "channel",
-                ],
-            },
         },
     }
 

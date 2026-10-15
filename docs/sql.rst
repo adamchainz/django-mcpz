@@ -16,7 +16,7 @@ The LLM writes the SQL, and the SQL may come from whoever it is talking to, and 
 The tools are designed for a dedicated PostgreSQL role that can read chosen columns of chosen tables and views, and nothing eSetup
 -----
 
-The setup takes four steps: installing the app, a database alias for the role, the :setting:`MCPZ_SQL_READERS` setting listing what the role can read, and the tools.
+The setup takes four steps: installing the app, a database alias for the role, a reader listing what the role can read, and the tools.
 
 1. Add the ``django_mcpz.sql`` app to your ``INSTALLED_APPS``:
 
@@ -28,7 +28,7 @@ The setup takes four steps: installing the app, a database alias for the role, t
            ...,
        ]
 
-   After every ``migrate``, it creates and updates the roles in :setting:`MCPZ_SQL_READERS`, as below.
+   After every ``migrate``, it creates and updates the readers’ roles, as below.
 
 2. Add a database alias that connects as the role, which the app creates:
 
@@ -56,23 +56,25 @@ The setup takes four steps: installing the app, a database alias for the role, t
 
    If you use a `database router <https://docs.djangoproject.com/en/stable/topics/db/multi-db/#database-routers>`__, make sure it doesn’t send migrations to this alias.
 
-3. List the columns the role can read in the :setting:`MCPZ_SQL_READERS` setting, keyed by the alias, as a dict of model labels to field names:
+3. Define a :class:`~django_mcpz.sql.readers.SQLReader` alongside your MCP server, naming the alias, and listing the columns the role can read as a dict of models to field names:
 
    .. code-block:: python
 
-       MCPZ_SQL_READERS = {
-           "mcp_reader": {
-               "tables": {
-                   "pizzeria.Pizza": ["id", "name", "price", "vegetarian"],
-                   "pizzeria.Order": ["id", "pizza_id", "quantity", "total", "placed_at"],
-               },
+       from django_mcpz.sql.readers import SQLReader
+       from example.models import Order, Pizza
+
+       reports_reader = SQLReader(
+           using="mcp_reader",
+           tables={
+               Pizza: ["id", "name", "price", "vegetarian"],
+               Order: ["id", "pizza_id", "quantity", "total", "placed_at"],
            },
-       }
+       )
 
    Each field is a column of the model’s table, named by the field’s name, or, for foreign keys, its attribute name, like ``pizza_id``.
    Only the named columns are exposed, so adding a field to a model later never exposes its column, such as ``Order.requests`` here, which holds customers’ free text.
 
-   After every ``migrate``, the app makes the role match the setting:
+   After every ``migrate``, the app makes the role match the reader:
 
    * it creates the role if it doesn’t exist, with the alias’s ``PASSWORD``;
    * grants it ``CONNECT`` on the database and ``USAGE`` on the tables’ schemas;
@@ -83,8 +85,12 @@ The setup takes four steps: installing the app, a database alias for the role, t
    Listed tables and columns missing from the database are skipped, and reported in ``migrate``’s output.
    This happens after migrations are unapplied, or applied only up to an earlier one, leaving the database behind the models, until a later ``migrate`` catches up and grants them.
 
-   The ``default`` alias’s role makes these changes, so it needs permission to create roles, or create the role yourself beforehand, and must own the tables, or be able to grant on them.
+   The ``default`` alias’s role makes these changes, unless you pick another with ``grantor``, so it needs permission to create roles, or create the role yourself beforehand, and must own the tables, or be able to grant on them.
    It also runs when the test runner creates the test database, so the role has its grants there too.
+
+   To find the readers, the app imports your URLconf after migrating, and with it every module that routes an MCP server.
+   So define readers in those modules, or ones they import, and keep them referenced, such as by passing them to :func:`~django_mcpz.sql.tools.add_sql_tools`, or as module-level variables.
+   Each alias can have only one reader, since its role can only have one set of grants, so share it between servers, rather than defining it twice.
 
    With column-level grants, ``SELECT *`` on a table with unexposed columns fails with “permission denied”, but the schema lists only the exposed columns, so the LLM names them instead.
 
@@ -153,7 +159,7 @@ The setup takes four steps: installing the app, a database alias for the role, t
    .. |db_comment| replace:: ``db_comment``
    __ https://docs.djangoproject.com/en/stable/ref/models/fields/#db-comment
 
-4. Add the tools to your server, naming the reader:
+4. Add the tools to your server, with the reader:
 
    .. code-block:: python
 
@@ -161,7 +167,7 @@ The setup takes four steps: installing the app, a database alias for the role, t
 
        add_sql_tools(
            server,
-           reader="mcp_reader",
+           reader=reports_reader,
            context="MCPizza's sales data. Prices and totals are in pounds (GBP).",
        )
 
@@ -270,19 +276,3 @@ Some things the role can still do, given PostgreSQL’s defaults:
 Use your server’s ``auth`` and the ``permission`` argument to limit who can call the tools, and consider pointing the alias at a read replica.
 
 The tools are marked as read-only, with ``readOnlyHint``, so clients may run them without asking the user each time.
-
-Settings
---------
-
-.. setting:: MCPZ_SQL_READERS
-
-A dict of the read-only roles the SQL tools can query as, keyed by the database alias that logs in as each.
-Each value is a dict of:
-
-* ``"tables"``: a dict of model labels, like ``"app_label.ModelName"``, to lists of the names of the fields whose columns the role can read.
-  Fields can be named by their name or attribute name, and must be columns of the model’s own table.
-
-* ``"using"``: optional, the alias whose role creates and updates the reader’s role, after that alias is migrated.
-  Default ``"default"``.
-
-The setting is checked when the tools are added and after each ``migrate``, raising ``ImproperlyConfigured`` for an unknown alias, model, or field, or a field that isn’t a column.

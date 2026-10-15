@@ -23,8 +23,9 @@ from django_mcpz.server import (
     elicit,
     public,
 )
+from django_mcpz.sql.readers import SQLReader
 from django_mcpz.sql.tools import add_sql_tools
-from pizzeria.models import Order, Pizza
+from pizzeria.models import MenuItem, Order, OrderLine, Pizza
 
 server = MCPServer(
     name="mcpizza",
@@ -303,9 +304,34 @@ def menu_link(request: HttpRequest, params: MenuLinkParams) -> ResourceLink:
 
 if "reader" in settings.DATABASES:
     # Ad hoc reporting over the read-only views, for questions the other tools
-    # don't answer, like "which pizza sold best last month?"
+    # don't answer, like "which pizza sold best last month?" The reader alias
+    # logs in as a role that django_mcpz.sql allows to read only these
+    # columns, after every migrate. Fields not named here stay hidden, even if
+    # they are added to the models later.
+    reports_reader = SQLReader(
+        using="reader",
+        tables={
+            MenuItem: [
+                "id",
+                "name",
+                "price",
+                "vegetarian",
+                "available_from",
+                "available_until",
+            ],
+            OrderLine: [
+                "id",
+                "pizza_id",
+                "quantity",
+                "total",
+                "placed_at",
+                "has_requests",
+                "channel",
+            ],
+        },
+    )
     add_sql_tools(
         server,
-        reader="reader",
+        reader=reports_reader,
         context="MCPizza's sales data. Prices and totals are in pounds (GBP).",
     )

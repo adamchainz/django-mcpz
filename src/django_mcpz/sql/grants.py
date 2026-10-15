@@ -1,5 +1,5 @@
 """
-Maintaining the grants of the read-only roles in MCPZ_SQL_READERS, after
+Maintaining the grants of the read-only roles defined with SQLReader, after
 every migrate.
 """
 
@@ -10,56 +10,60 @@ from typing import Any, TextIO
 
 from django.core.exceptions import ImproperlyConfigured
 from django.db import connections, transaction
+from django.urls import get_resolver
 from psycopg import sql as pg_sql
 
-from django_mcpz.sql.conf import Reader, get_readers, quote_name
+from django_mcpz.sql.readers import SQLReader, all_readers, quote_name
 
 
 def sync_readers(
     using: str, verbosity: int = 1, stdout: TextIO | None = None, **kwargs: Any
 ) -> None:
     """
-    The post_migrate handler, syncing the grants of the readers maintained
-    by the database alias just migrated.
+    The post_migrate handler, syncing the grants of the readers whose
+    grantor is the database alias just migrated.
     """
-    for reader in get_readers():
-        if reader.using == using:
+    # Readers are defined alongside the tools that use them, so import the
+    # URLconf, and with it every module routing an MCP server.
+    get_resolver().url_patterns  # noqa: B018
+    for reader in all_readers():
+        if reader.grantor == using:
             missing = sync_grants(reader)
             if missing and verbosity >= 1:
                 (stdout or sys.stdout).write(
-                    f"  Granted {reader.alias!r} no access to these, missing"
+                    f"  Granted {reader.using!r} no access to these, missing"
                     f" from the database: {', '.join(missing)}.\n"
                 )
 
 
-def sync_grants(reader: Reader) -> list[str]:
+def sync_grants(reader: SQLReader) -> list[str]:
     """
     Make the reader's role able to SELECT exactly its tables' columns, and
     nothing else.
 
-    This runs on the reader's using connection. It creates the role if it's
+    This runs on the reader's grantor connection. It creates the role if it's
     missing, with the reader alias's password, grants it CONNECT on the
     database and USAGE on the tables' schemas, revokes everything it was
     granted on tables and columns, then grants SELECT on the columns. It all
     happens in one transaction, so the role never sees a half-way state.
     """
-    using = reader.using
+    using = reader.grantor
     connection = connections[using]
     if connection.vendor != "postgresql":
         raise ImproperlyConfigured(
             f"The SQL tools need a PostgreSQL database, but {using!r} is"
             f" {connection.vendor}."
         )
-    reader_settings = connections[reader.alias].settings_dict
+    reader_settings = connections[reader.using].settings_dict
     role = reader_settings["USER"]
     if not role:
         raise ImproperlyConfigured(
-            f"The {reader.alias!r} database alias needs to set USER, the role"
+            f"The {reader.using!r} database alias needs to set USER, the role"
             " it logs in as."
         )
     if role == connection.settings_dict["USER"]:
         raise ImproperlyConfigured(
-            f"The {reader.alias!r} and {using!r} database aliases log in as the"
+            f"The {reader.using!r} and {using!r} database aliases log in as the"
             f" same role, {role!r}, so it can't be limited to reading tables."
         )
     with transaction.atomic(using=using):

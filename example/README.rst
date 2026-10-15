@@ -11,10 +11,10 @@ The important code lives in these files:
 * ``pizzeria/models.py``: the models, including unmanaged ones for the report views.
 * ``pizzeria/migrations/0001_initial.py``: the migration that creates the tables, seeds the menu and three months of orders, and creates the report views.
   Specials are dated relative to the day you run the migration.
-* ``pizzeria/mcp.py``: the MCP server and tools, in the app’s ``mcp`` module, following the `django-mcpz convention <https://django-mcpz.readthedocs.io/en/latest/servers.html>`__.
+* ``pizzeria/mcp.py``: the MCP server and tools, in the app’s ``mcp`` module, following the `django-mcpz convention <https://django-mcpz.readthedocs.io/en/latest/servers.html>`__, plus, on PostgreSQL, the ``SQLReader`` listing the columns the SQL tools can read.
 * ``pizzeria/views.py`` and ``pizzeria/templates/pizzeria/menu.html``: the menu web page that the ``menu_link`` tool points at.
 * ``pizzeria/static/pizzeria/icon.svg``: the server’s icon, which clients show alongside its title.
-* ``pizzeria/settings.py``: the settings, choosing SQLite or PostgreSQL, plus, on PostgreSQL, the ``MCPZ_SQL_READERS`` setting listing the columns the SQL tools can read.
+* ``pizzeria/settings.py``: the settings, choosing SQLite or PostgreSQL.
 
 The included tools are:
 
@@ -80,7 +80,7 @@ Then, in this directory, run with the ``MCPIZZA_POSTGRES`` environment variable 
     uv run --group example manage.py runserver
 
 On PostgreSQL, migrating also creates ``mcpizza_reader``, the role the SQL tools connect as through the ``reader`` database alias.
-The ``django_mcpz.sql`` app does this, granting the role the columns listed in the ``MCPZ_SQL_READERS`` setting.
+The ``django_mcpz.sql`` app does this, granting the role the columns listed by the ``SQLReader`` in ``pizzeria/mcp.py``.
 It may only read the two report views, not the tables behind them.
 
 To start afresh, remove the container and its data from the repository root with ``docker compose down --volumes``, then start it and migrate again.

@@ -1,6 +1,6 @@
 """
-Tools that let an LLM run read-only SQL queries against PostgreSQL, as a role
-from MCPZ_SQL_READERS, limited to chosen columns of chosen tables and views.
+Tools that let an LLM run read-only SQL queries against PostgreSQL, as the role
+of an SQLReader, limited to chosen columns of chosen tables and views.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from django.http import HttpRequest
 from django_msgspec import enc_hook as django_enc_hook
 
 from django_mcpz.server import MCPServer, ToolError
-from django_mcpz.sql.conf import Table, db_type, get_reader, quote_name
+from django_mcpz.sql.readers import SQLReader, Table, db_type, quote_name
 
 try:
     import psycopg
@@ -103,7 +103,7 @@ class SQLQueryParams(msgspec.Struct):
 def add_sql_tools(
     server: MCPServer,
     *,
-    reader: str,
+    reader: SQLReader,
     context: str | None = None,
     max_rows: int = 1000,
     max_size: int = 50_000,
@@ -116,10 +116,10 @@ def add_sql_tools(
     describing the columns of some, as SQL, and one running a read-only query
     against them.
 
-    The reader is a database alias in MCPZ_SQL_READERS, which logs in as a
-    PostgreSQL role that may only SELECT the columns listed there, as
-    maintained by the django_mcpz.sql app after every migrate. That role is
-    the security boundary. This adds read-only transactions, a single
+    Queries run through the reader's database alias, which logs in as a
+    PostgreSQL role that may only SELECT the reader's columns, as maintained
+    by the django_mcpz.sql app after every migrate. That role is the security
+    boundary. This adds read-only transactions, a single
     statement per call, a statement timeout, and limits on the result.
     """
     if not apps.is_installed("django_mcpz.sql"):
@@ -127,7 +127,7 @@ def add_sql_tools(
             "add_sql_tools() needs 'django_mcpz.sql' in INSTALLED_APPS, to"
             " maintain the reader role's grants."
         )
-    using = reader
+    using = reader.using
     connection = connections[using]
     if connection.vendor != "postgresql":
         raise ImproperlyConfigured(
@@ -142,7 +142,6 @@ def add_sql_tools(
         )
     if psycopg is None:  # pragma: no cover
         raise ImproperlyConfigured("add_sql_tools() needs psycopg 3.")
-    table_list = list(get_reader(reader).tables)
     if max_rows < 1:
         raise ImproperlyConfigured("max_rows must be at least 1.")
     if max_size < 1000:
@@ -150,6 +149,8 @@ def add_sql_tools(
     if timeout <= 0:
         raise ImproperlyConfigured("timeout must be positive.")
 
+    # The tools refer to the reader, keeping it alive in the registry that
+    # the post_migrate handler syncs.
     schema_name = f"{name_prefix}_schema"
     query_name = f"{name_prefix}_query"
 
@@ -169,9 +170,9 @@ def add_sql_tools(
     def sql_schema(request: HttpRequest, params: SQLSchemaParams) -> str:
         if not params.tables:
             return list_tables(
-                table_list, using=using, context=context, schema_tool=schema_name
+                reader.tables, using=using, context=context, schema_tool=schema_name
             )
-        by_name = {table.name: table for table in table_list}
+        by_name = {table.name: table for table in reader.tables}
         # Accept names as the model would write them in SQL, quoted or not.
         names = [name.strip().strip('"').replace('""', '"') for name in params.tables]
         unknown = [name for name in names if name not in by_name]
@@ -184,7 +185,7 @@ def add_sql_tools(
         return describe_tables(
             [by_name[name] for name in dict.fromkeys(names)],
             using=using,
-            all_tables=table_list,
+            all_tables=reader.tables,
         )
 
     @server.tool(

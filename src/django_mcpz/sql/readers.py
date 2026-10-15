@@ -1,31 +1,41 @@
 """
-The MCPZ_SQL_READERS setting, which says what each read-only database role
-can see, for both the tools and the grants that enforce it.
+Read-only database roles for the SQL tools, defined with SQLReader alongside
+the tools, and what each can read, for both the tools and the grants that
+enforce it.
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
-from dataclasses import dataclass
+import weakref
+from collections.abc import Mapping, Sequence
 from typing import Any
 
-from django.apps import apps
 from django.conf import settings
 from django.core.exceptions import FieldDoesNotExist, ImproperlyConfigured
 from django.db import connections
 from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.models import Field, Model
 
-SETTING = "MCPZ_SQL_READERS"
+# Every reader defined, by database alias, for the post_migrate handler to
+# sync. Weak, so a reader lasts only as long as something uses it, such as
+# the tools from add_sql_tools().
+_readers: weakref.WeakValueDictionary[str, SQLReader] = (
+    weakref.WeakValueDictionary()
+)
 
 
-@dataclass(frozen=True)
 class Table:
     """A model's table, and the fields exposed as its columns."""
 
+    __slots__ = ("model", "fields")
+
     model: type[Model]
     fields: tuple[Field[Any, Any], ...]
+
+    def __init__(self, model: type[Model], fields: tuple[Field[Any, Any], ...]):
+        self.model = model
+        self.fields = fields
 
     @property
     def name(self) -> str:
@@ -36,92 +46,95 @@ class Table:
         return [field.column for field in self.fields if field.column]
 
 
-@dataclass(frozen=True)
-class Reader:
+class SQLReader:
     """
-    A read-only role: the database alias that logs in as it, the alias that
-    maintains its grants, and the tables it can read.
+    A read-only database role for the SQL tools: the database alias that logs
+    in as it, the alias whose role maintains its grants, and the columns of
+    the models' tables it can read.
+
+    After every migrate, the django_mcpz.sql app makes the role able to read
+    exactly these columns. Every field must be named, so adding a field to a
+    model never exposes its column.
     """
 
-    alias: str
+    __slots__ = ("using", "grantor", "tables", "__weakref__")
+
     using: str
+    grantor: str
     tables: tuple[Table, ...]
 
+    def __init__(
+        self,
+        *,
+        tables: Mapping[type[Model], Sequence[str]],
+        using: str = "default",
+        grantor: str = "default",
+    ) -> None:
+        for name, alias in (("using", using), ("grantor", grantor)):
+            if alias not in settings.DATABASES:
+                raise ImproperlyConfigured(
+                    f"SQLReader {name}={alias!r} isn't a database alias in"
+                    " DATABASES."
+                )
+        if using == grantor:
+            raise ImproperlyConfigured(
+                f"SQLReader needs using, the alias that logs in as the reader"
+                f" role, to differ from grantor, the alias whose role grants it"
+                f" access, but both are {using!r}."
+            )
+        resolved = tuple(_resolve_tables(tables, connections[using]))
+        existing = _readers.get(using)
+        if existing is not None and (
+            existing.grantor != grantor
+            or [(t.model, t.fields) for t in existing.tables]
+            != [(t.model, t.fields) for t in resolved]
+        ):
+            raise ImproperlyConfigured(
+                f"Two SQLReaders for {using!r} differ, but its role can have"
+                " only one set of grants. Define it once and share it."
+            )
+        object.__setattr__(self, "using", using)
+        object.__setattr__(self, "grantor", grantor)
+        object.__setattr__(self, "tables", resolved)
+        _readers[using] = self
 
-def get_readers() -> list[Reader]:
-    """Every reader in the setting, checked."""
-    config = getattr(settings, SETTING, {})
-    if not isinstance(config, Mapping):
-        raise ImproperlyConfigured(f"{SETTING} must be a dict, not {config!r}.")
-    return [_reader(alias, config[alias]) for alias in config]
+    def __setattr__(self, name: str, value: Any) -> None:
+        raise AttributeError("SQLReader is immutable.")
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError("SQLReader is immutable.")
 
 
-def get_reader(alias: str) -> Reader:
-    """The reader for the database alias, checked."""
-    config = getattr(settings, SETTING, {})
-    if not isinstance(config, Mapping) or alias not in config:
-        raise ImproperlyConfigured(
-            f"{SETTING} has no reader for the database alias {alias!r}."
-        )
-    return _reader(alias, config[alias])
+def all_readers() -> list[SQLReader]:
+    """Every reader defined, and still in use."""
+    return list(_readers.values())
 
 
-def _reader(alias: str, config: Any) -> Reader:
-    where = f"{SETTING}[{alias!r}]"
-    if alias not in settings.DATABASES:
-        raise ImproperlyConfigured(
-            f"{where} needs {alias!r} to be a database alias in DATABASES,"
-            " which logs in as the reader role."
-        )
-    if not isinstance(config, Mapping):
-        raise ImproperlyConfigured(f"{where} must be a dict, not {config!r}.")
-    unknown = sorted(set(config) - {"tables", "using"})
-    if unknown:
-        raise ImproperlyConfigured(
-            f"{where} has unknown keys: {', '.join(map(repr, unknown))}."
-        )
-    using = config.get("using", "default")
-    if using not in settings.DATABASES or using == alias:
-        raise ImproperlyConfigured(
-            f"{where}['using'] must be another database alias in DATABASES,"
-            f" whose role maintains the reader's grants, not {using!r}."
-        )
-    tables = resolve_tables(config.get("tables"), connections[using], where)
-    return Reader(alias=alias, using=using, tables=tuple(tables))
-
-
-def resolve_tables(
-    tables: Any, connection: BaseDatabaseWrapper, where: str
-) -> list[Table]:
+def _resolve_tables(tables: Any, connection: BaseDatabaseWrapper) -> list[Table]:
     """
-    Check a dict of model labels to field names, returning each model's
-    fields in the model's order. Every field must be named, so adding a field
-    to a model never exposes its column.
+    Check a dict of models to field names, returning each model's fields in
+    the model's order. Typed loosely, since it checks the types too.
     """
     if not isinstance(tables, Mapping) or not tables:
         raise ImproperlyConfigured(
-            f"{where}['tables'] must be a dict of model labels, like"
-            " 'app_label.ModelName', to lists of field names."
+            "SQLReader tables must be a dict of models to lists of field names."
         )
     result: list[Table] = []
     names: set[str] = set()
-    for label, field_names in tables.items():
-        try:
-            model = apps.get_model(label)
-        except (LookupError, ValueError):
+    for model, field_names in tables.items():
+        if not isinstance(model, type) or not issubclass(model, Model):
             raise ImproperlyConfigured(
-                f"{where}['tables'] has {label!r}, which isn't an installed"
-                " model's label."
-            ) from None
+                f"SQLReader tables must have models as keys, not {model!r}."
+            )
         opts = model._meta
+        where = f"SQLReader tables[{opts.label}]"
         if isinstance(field_names, str) or not field_names:
             raise ImproperlyConfigured(
-                f"{where}['tables'][{label!r}] must be a list of field names,"
-                f" not {field_names!r}."
+                f"{where} must be a list of field names, not {field_names!r}."
             )
         if opts.db_table in names:
             raise ImproperlyConfigured(
-                f"{where}['tables'] has the table {opts.db_table!r} more than"
+                f"SQLReader tables has the table {opts.db_table!r} more than"
                 " once. List all its fields together."
             )
         names.add(opts.db_table)
@@ -138,18 +151,18 @@ def resolve_tables(
                 found = opts.get_field(field_name)
             except FieldDoesNotExist:
                 raise ImproperlyConfigured(
-                    f"{where}['tables'][{label!r}] has {field_name!r}, which"
-                    f" isn't a field of {opts.label}."
+                    f"{where} has {field_name!r}, which isn't a field of"
+                    f" {opts.label}."
                 ) from None
             name = str(found.name)
             if columns.get(name) is not found:
                 raise ImproperlyConfigured(
-                    f"{where}['tables'][{label!r}] has {field_name!r}, which"
-                    f" isn't a column of {opts.label}'s table."
+                    f"{where} has {field_name!r}, which isn't a column of"
+                    f" {opts.label}'s table."
                 )
             if name in chosen:
                 raise ImproperlyConfigured(
-                    f"{where}['tables'][{label!r}] has {field_name!r} more than once."
+                    f"{where} has {field_name!r} more than once."
                 )
             chosen.add(name)
         fields = tuple(
