@@ -22,8 +22,8 @@ from django_mcpz.server import (
     elicit,
     public,
 )
-from django_mcpz.sql import add_sql_tools
-from tests.models import Widget, WidgetView
+from django_mcpz.sql.tools import add_sql_tools
+from tests.models import Widget
 
 server = MCPServer(
     name="example-server",
@@ -576,14 +576,10 @@ bearer_elicitation_server.tool(
 )(confirm_as_user)
 
 
-# The tables the SQL tools expose, also granted by the handler in tests.apps.
-SQL_TABLES = [(WidgetView, ("id", "name", "price"))]
-
 sql_server = MCPServer(name="sql-server", version="1.0.0", auth=public)
 add_sql_tools(
     sql_server,
-    tables=SQL_TABLES,
-    using="reader",
+    reader="reader",
     context="Test widgets.",
     max_rows=2,
     timeout=1,

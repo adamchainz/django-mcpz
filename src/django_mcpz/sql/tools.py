@@ -1,21 +1,20 @@
 """
-Tools that let an LLM run read-only SQL queries against PostgreSQL, limited to
-chosen columns of chosen tables and views.
+Tools that let an LLM run read-only SQL queries against PostgreSQL, as a role
+from MCPZ_SQL_READERS, limited to chosen columns of chosen tables and views.
 """
 
 from __future__ import annotations
 
 import math
-import re
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
 from decimal import Decimal
 from typing import Annotated, Any
 
 import msgspec
 import msgspec.json
-from django.core.exceptions import FieldDoesNotExist, ImproperlyConfigured
+from django.apps import apps
+from django.core.exceptions import ImproperlyConfigured
 from django.db import connections, transaction
 from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.models import CompositePrimaryKey, Field, Model
@@ -23,11 +22,11 @@ from django.http import HttpRequest
 from django_msgspec import enc_hook as django_enc_hook
 
 from django_mcpz.server import MCPServer, ToolError
+from django_mcpz.sql.conf import Table, db_type, get_reader, quote_name
 
 try:
     import psycopg
     import psycopg.pq
-    from psycopg import sql as pg_sql
     from psycopg.types.json import JsonbLoader
 except ImportError:  # pragma: no cover
     psycopg = None  # type: ignore[assignment]
@@ -104,8 +103,7 @@ class SQLQueryParams(msgspec.Struct):
 def add_sql_tools(
     server: MCPServer,
     *,
-    tables: Sequence[tuple[type[Model], Sequence[str]]],
-    using: str,
+    reader: str,
     context: str | None = None,
     max_rows: int = 1000,
     max_size: int = 50_000,
@@ -114,16 +112,22 @@ def add_sql_tools(
     permission: Callable[[HttpRequest], bool] | str | None = None,
 ) -> None:
     """
-    Add two tools to the server: one listing the tables, or describing the
-    columns of some, as SQL, and one running a read-only query against them.
-    Tables are given as pairs of a model and the names of the fields to
-    expose, as columns of its table.
+    Add two tools to the server: one listing the reader's tables, or
+    describing the columns of some, as SQL, and one running a read-only query
+    against them.
 
-    The queries run on the database connection named by using, which should
-    log in as a PostgreSQL role that may only SELECT from those tables. That
-    role is the security boundary. This adds read-only transactions, a single
+    The reader is a database alias in MCPZ_SQL_READERS, which logs in as a
+    PostgreSQL role that may only SELECT the columns listed there, as
+    maintained by the django_mcpz.sql app after every migrate. That role is
+    the security boundary. This adds read-only transactions, a single
     statement per call, a statement timeout, and limits on the result.
     """
+    if not apps.is_installed("django_mcpz.sql"):
+        raise ImproperlyConfigured(
+            "add_sql_tools() needs 'django_mcpz.sql' in INSTALLED_APPS, to"
+            " maintain the reader role's grants."
+        )
+    using = reader
     connection = connections[using]
     if connection.vendor != "postgresql":
         raise ImproperlyConfigured(
@@ -138,7 +142,7 @@ def add_sql_tools(
         )
     if psycopg is None:  # pragma: no cover
         raise ImproperlyConfigured("add_sql_tools() needs psycopg 3.")
-    table_list = _resolve_tables(tables, connection, "add_sql_tools")
+    table_list = list(get_reader(reader).tables)
     if max_rows < 1:
         raise ImproperlyConfigured("max_rows must be at least 1.")
     if max_size < 1000:
@@ -444,207 +448,11 @@ def _shorten(value: Any, max_value: int) -> tuple[Any, bool]:
     return f"{text[:max_value]}… [{len(text) - max_value} more characters]", True
 
 
-# Role management
-
-
-def sync_sql_grants(
-    *,
-    tables: Sequence[tuple[type[Model], Sequence[str]]],
-    reader: str,
-    using: str = "default",
-) -> None:
-    """
-    Make the role that the reader database alias logs in as able to SELECT
-    exactly the given columns, and nothing else. Tables are given as for
-    add_sql_tools(), as pairs of a model and the names of its fields.
-
-    Run on the using connection, typically from a post_migrate handler, so
-    grants follow the code as it changes. This creates the role if it's
-    missing, with the alias's password, grants it CONNECT on the database
-    and USAGE on the tables' schemas, revokes everything it was granted on
-    tables and columns, then grants SELECT on the given columns. It all
-    happens in one transaction, so the role never sees a half-way state.
-    """
-    connection = connections[using]
-    if connection.vendor != "postgresql":
-        raise ImproperlyConfigured(
-            f"sync_sql_grants() needs a PostgreSQL database, but {using!r} is"
-            f" {connection.vendor}."
-        )
-    reader_settings = connections[reader].settings_dict
-    role = reader_settings["USER"]
-    if not role:
-        raise ImproperlyConfigured(
-            f"sync_sql_grants() needs the {reader!r} database alias to set"
-            " USER, the role it logs in as."
-        )
-    if role == connection.settings_dict["USER"]:
-        raise ImproperlyConfigured(
-            f"The {reader!r} and {using!r} database aliases log in as the same"
-            f" role, {role!r}, so it can't be limited to reading the tables."
-        )
-    table_list = _resolve_tables(tables, connection, "sync_sql_grants")
-    with transaction.atomic(using=using):
-        connection.ensure_connection()
-        pg_connection = connection.connection
-        with pg_connection.cursor() as cursor:
-            role_id = pg_sql.Identifier(role)
-            cursor.execute("SELECT FROM pg_roles WHERE rolname = %s", [role])
-            if cursor.fetchone() is None:
-                cursor.execute(
-                    pg_sql.SQL("CREATE ROLE {} LOGIN PASSWORD {}").format(
-                        role_id, pg_sql.Literal(reader_settings["PASSWORD"] or None)
-                    )
-                )
-            cursor.execute(
-                pg_sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(
-                    pg_sql.Identifier(pg_connection.info.dbname), role_id
-                )
-            )
-            # Everything the role has been granted, on tables or columns.
-            # Revoking on a table revokes on its columns too.
-            cursor.execute(_GRANTED_TABLES_SQL, {"role": role})
-            for (relation,) in cursor.fetchall():
-                cursor.execute(
-                    pg_sql.SQL("REVOKE ALL ON TABLE {} FROM {}").format(
-                        pg_sql.SQL(relation), role_id
-                    )
-                )
-            for table in table_list:
-                cursor.execute(
-                    "SELECT to_regclass(%s)::text, n.nspname FROM pg_class c"
-                    " JOIN pg_namespace n ON n.oid = c.relnamespace"
-                    " WHERE c.oid = to_regclass(%s)",
-                    [quote_name(table.name), quote_name(table.name)],
-                )
-                row = cursor.fetchone()
-                if row is None:
-                    raise ImproperlyConfigured(
-                        f"sync_sql_grants() can't find the table {table.name!r}."
-                        " Create it, or its view, in a migration."
-                    )
-                relation, schema = row
-                cursor.execute(
-                    pg_sql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(
-                        pg_sql.Identifier(schema), role_id
-                    )
-                )
-                cursor.execute(
-                    pg_sql.SQL("GRANT SELECT ({}) ON TABLE {} TO {}").format(
-                        pg_sql.SQL(", ").join(
-                            [pg_sql.Identifier(column) for column in table.columns]
-                        ),
-                        pg_sql.SQL(relation),
-                        role_id,
-                    )
-                )
-
-
-# Tables, views, and so on, where the role holds privileges on the relation
-# or on any of its columns, granted explicitly rather than through PUBLIC.
-_GRANTED_TABLES_SQL = """
-SELECT c.oid::regclass::text
-FROM pg_class c
-JOIN pg_namespace n ON n.oid = c.relnamespace
-WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
-AND (
-    EXISTS (
-        SELECT FROM aclexplode(c.relacl) a
-        WHERE a.grantee = (SELECT oid FROM pg_roles WHERE rolname = %(role)s)
-    )
-    OR EXISTS (
-        SELECT FROM pg_attribute att, aclexplode(att.attacl) a
-        WHERE att.attrelid = c.oid
-        AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = %(role)s)
-    )
-)
-ORDER BY 1
-"""
-
-
-@dataclass(frozen=True)
-class _Table:
-    """A model's table, and the fields exposed as its columns."""
-
-    model: type[Model]
-    fields: tuple[Field[Any, Any], ...]
-
-    @property
-    def name(self) -> str:
-        return self.model._meta.db_table
-
-    @property
-    def columns(self) -> list[str]:
-        return [field.column for field in self.fields if field.column]
-
-
-def _resolve_tables(
-    tables: Sequence[tuple[type[Model], Sequence[str]]],
-    connection: BaseDatabaseWrapper,
-    function: str,
-) -> list[_Table]:
-    """
-    Check the pairs of a model and field names, returning their fields in
-    the model's order. Every field must be named, so adding a field to a
-    model never exposes its column.
-    """
-    if not tables:
-        raise ImproperlyConfigured(f"{function}() needs at least one table.")
-    result: list[_Table] = []
-    names: set[str] = set()
-    for model, field_names in tables:
-        opts = model._meta
-        label = opts.label
-        if isinstance(field_names, str):
-            raise ImproperlyConfigured(
-                f"{function}() needs a sequence of field names for {label},"
-                f" not the string {field_names!r}."
-            )
-        if not field_names:
-            raise ImproperlyConfigured(
-                f"{function}() needs at least one field name for {label}."
-            )
-        if opts.db_table in names:
-            raise ImproperlyConfigured(
-                f"{function}() got the table {opts.db_table!r} more than once."
-                " List all its fields together."
-            )
-        names.add(opts.db_table)
-        # Local fields only, since a multi-table inheritance child's table
-        # holds only its own columns, plus the link to its parent.
-        columns = {
-            field.name: field
-            for field in opts.local_concrete_fields
-            if _db_type(field, connection) is not None
-        }
-        chosen: set[str] = set()
-        for field_name in field_names:
-            try:
-                field = opts.get_field(field_name)
-            except FieldDoesNotExist:
-                raise ImproperlyConfigured(
-                    f"{function}() got {field_name!r}, which isn't a field of {label}."
-                ) from None
-            if columns.get(field.name) is not field:
-                raise ImproperlyConfigured(
-                    f"{function}() got {field_name!r}, which isn't a column of"
-                    f" {label}'s table."
-                )
-            if field.name in chosen:
-                raise ImproperlyConfigured(
-                    f"{function}() got {field_name!r} more than once for {label}."
-                )
-            chosen.add(field.name)
-        fields = tuple(field for name, field in columns.items() if name in chosen)
-        result.append(_Table(model, fields))
-    return result
-
-
 # Schema description
 
 
 def list_tables(
-    table_list: Sequence[_Table],
+    table_list: Sequence[Table],
     *,
     using: str,
     context: str | None = None,
@@ -676,10 +484,10 @@ def list_tables(
 
 
 def describe_tables(
-    table_list: Sequence[_Table],
+    table_list: Sequence[Table],
     *,
     using: str,
-    all_tables: Sequence[_Table] | None = None,
+    all_tables: Sequence[Table] | None = None,
 ) -> str:
     """
     Describe the tables as CREATE TABLE statements, with comments from each
@@ -698,7 +506,7 @@ def _table_description(model: type[Model]) -> str:
 
 
 def _describe_table(
-    table: _Table, connection: BaseDatabaseWrapper, exposed: dict[str, set[str]]
+    table: Table, connection: BaseDatabaseWrapper, exposed: dict[str, set[str]]
 ) -> str:
     opts = table.model._meta
     lines = []
@@ -708,7 +516,7 @@ def _describe_table(
     lines.append(f"CREATE TABLE {quote_name(opts.db_table)} (")
     columns = []
     for field in table.fields:
-        column = f"  {_quote_column(field)} {_db_type(field, connection)}"
+        column = f"  {_quote_column(field)} {db_type(field, connection)}"
         if not field.null:
             column += " NOT NULL"
         if field.primary_key:
@@ -739,12 +547,6 @@ def _describe_table(
 
 def _quote_column(field: Any) -> str:
     return quote_name(field.column)
-
-
-def _db_type(field: Field[Any, Any], connection: BaseDatabaseWrapper) -> str | None:
-    if field.is_relation:
-        return field.target_field.rel_db_type(connection)  # type: ignore[attr-defined,no-any-return]
-    return field.db_type(connection)
 
 
 def _docstring(model: type[Model]) -> str:
@@ -780,122 +582,3 @@ def _sql_literal(value: Any) -> str:
 
 def _comment(text: str) -> str:
     return "\n".join(f"-- {line}".rstrip() for line in text.strip().splitlines())
-
-
-# PostgreSQL's reserved key words, which can't be identifiers unquoted.
-_RESERVED = frozenset(
-    [
-        "all",
-        "analyse",
-        "analyze",
-        "and",
-        "any",
-        "array",
-        "as",
-        "asc",
-        "asymmetric",
-        "authorization",
-        "binary",
-        "both",
-        "case",
-        "cast",
-        "check",
-        "collate",
-        "collation",
-        "column",
-        "concurrently",
-        "constraint",
-        "create",
-        "cross",
-        "current_catalog",
-        "current_date",
-        "current_role",
-        "current_schema",
-        "current_time",
-        "current_timestamp",
-        "current_user",
-        "default",
-        "deferrable",
-        "desc",
-        "distinct",
-        "do",
-        "else",
-        "end",
-        "except",
-        "false",
-        "fetch",
-        "for",
-        "foreign",
-        "freeze",
-        "from",
-        "full",
-        "grant",
-        "group",
-        "having",
-        "ilike",
-        "in",
-        "initially",
-        "inner",
-        "intersect",
-        "into",
-        "is",
-        "isnull",
-        "join",
-        "lateral",
-        "leading",
-        "left",
-        "like",
-        "limit",
-        "localtime",
-        "localtimestamp",
-        "natural",
-        "not",
-        "notnull",
-        "null",
-        "offset",
-        "on",
-        "only",
-        "or",
-        "order",
-        "outer",
-        "overlaps",
-        "placing",
-        "primary",
-        "references",
-        "returning",
-        "right",
-        "select",
-        "session_user",
-        "similar",
-        "some",
-        "symmetric",
-        "system_user",
-        "table",
-        "tablesample",
-        "then",
-        "to",
-        "trailing",
-        "true",
-        "union",
-        "unique",
-        "user",
-        "using",
-        "variadic",
-        "verbose",
-        "when",
-        "where",
-        "window",
-        "with",
-    ]
-)
-_PLAIN_IDENTIFIER = re.compile(r"[a-z_][a-z0-9_$]*")
-
-
-def quote_name(name: str) -> str:
-    """
-    Quote an identifier only when it needs quoting, keeping the schema
-    readable, and the model's SQL natural.
-    """
-    if _PLAIN_IDENTIFIER.fullmatch(name) and name not in _RESERVED:
-        return name
-    return '"' + name.replace('"', '""') + '"'

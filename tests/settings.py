@@ -34,6 +34,14 @@ DATABASES: dict[str, dict[str, Any]] = {
     },
 }
 
+# The reader alias's role may read these columns, and nothing else.
+MCPZ_SQL_READERS: dict[str, Any] = {
+    "reader": {
+        "using": "postgres",
+        "tables": {"tests.WidgetView": ["id", "name", "price"]},
+    },
+}
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -43,6 +51,7 @@ INSTALLED_APPS = [
     "django_mcpz",
     "django_mcpz.oauth",
     "django_mcpz.bearer_tokens",
+    "django_mcpz.sql",
     "tests",
 ]
 

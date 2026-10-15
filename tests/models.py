@@ -88,3 +88,9 @@ class Child(Parent):
 
     class Meta:
         managed = False
+
+
+class WidgetProxy(Widget):
+    # Shares Widget's table.
+    class Meta:
+        proxy = True
