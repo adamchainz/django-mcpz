@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import io
 import ipaddress
 import uuid
 from decimal import Decimal
@@ -860,7 +861,7 @@ class SyncGrantsTests(TestCase):
 
     def sync(self, tables):
         with readers(tables):
-            sync_grants(get_reader("reader"))
+            return sync_grants(get_reader("reader"))
 
     def fetch(self, sql, params=None):
         with connections["postgres"].cursor() as cursor:
@@ -889,7 +890,7 @@ class SyncGrantsTests(TestCase):
     def test_view(self):
         # As the app does after migrating. Grants are per column, so not on
         # the table as a whole.
-        sync_grants(get_reader("reader"))
+        assert sync_grants(get_reader("reader")) == []
         assert self.any_column_privilege("mcpz_test_reader", "tests_widget_view")
         assert not self.table_privilege("tests_widget_view")
         assert not self.table_privilege("tests_widget")
@@ -972,19 +973,63 @@ class SyncGrantsTests(TestCase):
         )
 
     def test_missing_table(self):
-        with pytest.raises(ImproperlyConfigured) as excinfo:
-            self.sync({"tests.Undocumented": ["id"]})
-        assert str(excinfo.value) == (
-            "Can't find the table 'tests_undocumented' for the 'reader' reader."
-            " Create it, or its view, in a migration."
-        )
+        # As after unapplying the migration that creates it: skipped, with
+        # the rest still synced.
+        assert self.sync(
+            {"tests.Undocumented": ["id"], "tests.Widget": ["id", "name"]}
+        ) == ["tests_undocumented"]
+        assert self.column_privileges("tests_widget") == {
+            "id": True,
+            "name": True,
+            "price": False,
+            "in_stock": False,
+        }
+
+    def test_missing_column(self):
+        # As before the migration adding it is applied: skipped.
+        assert self.sync({"tests.WidgetLater": ["id", "name", "colour"]}) == [
+            "tests_widget.colour"
+        ]
+        assert self.column_privileges("tests_widget") == {
+            "id": True,
+            "name": True,
+            "price": False,
+            "in_stock": False,
+        }
+
+    def test_no_columns(self):
+        # Nothing left to grant, not even schema usage, for this table.
+        assert self.sync({"tests.WidgetLater": ["colour"]}) == ["tests_widget.colour"]
+        assert not self.any_column_privilege("mcpz_test_reader", "tests_widget")
+        assert not self.any_column_privilege("mcpz_test_reader", "tests_widget_view")
 
 
 class SyncReadersTests(SimpleTestCase):
     def test_only_readers_of_alias(self):
-        with mock.patch("django_mcpz.sql.grants.sync_grants") as sync:
+        with mock.patch("django_mcpz.sql.grants.sync_grants", return_value=[]) as sync:
             sync_readers(using="default")
             sync.assert_not_called()
             sync_readers(using="postgres")
         sync.assert_called_once()
         assert isinstance(sync.call_args.args[0], Reader)
+
+    def test_reports_missing(self):
+        stdout = io.StringIO()
+        with mock.patch(
+            "django_mcpz.sql.grants.sync_grants",
+            return_value=["tests_widget_view", "tests_widget.colour"],
+        ):
+            sync_readers(using="postgres", verbosity=1, stdout=stdout)
+            sync_readers(using="postgres", verbosity=0, stdout=stdout)
+        assert stdout.getvalue() == (
+            "  Granted 'reader' no access to these, missing from the database:"
+            " tests_widget_view, tests_widget.colour.\n"
+        )
+
+    def test_reports_missing_default_stdout(self):
+        with (
+            mock.patch("django_mcpz.sql.grants.sync_grants", return_value=["tests_x"]),
+            mock.patch("sys.stdout", new_callable=io.StringIO) as stdout,
+        ):
+            sync_readers(using="postgres")
+        assert "tests_x" in stdout.getvalue()

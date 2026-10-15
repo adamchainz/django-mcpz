@@ -94,3 +94,14 @@ class WidgetProxy(Widget):
     # Shares Widget's table.
     class Meta:
         proxy = True
+
+
+class WidgetLater(models.Model):
+    # Widgets as if a later migration, not yet applied, adds colour.
+    id = models.BigIntegerField(primary_key=True)
+    name = models.CharField(max_length=100)
+    colour = models.CharField(max_length=20)
+
+    class Meta:
+        managed = False
+        db_table = "tests_widget"

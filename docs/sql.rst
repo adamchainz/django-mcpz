@@ -79,6 +79,10 @@ The setup takes four steps: installing the app, a database alias for the role, t
    * revokes everything previously granted to it on tables and columns, then grants ``SELECT`` on exactly the listed columns.
 
    It all happens in one transaction, so the role never sees a half-way state.
+
+   Listed tables and columns missing from the database are skipped, and reported in ``migrate``’s output.
+   This happens after migrations are unapplied, or applied only up to an earlier one, leaving the database behind the models, until a later ``migrate`` catches up and grants them.
+
    The ``default`` alias’s role makes these changes, so it needs permission to create roles, or create the role yourself beforehand, and must own the tables, or be able to grant on them.
    It also runs when the test runner creates the test database, so the role has its grants there too.
 

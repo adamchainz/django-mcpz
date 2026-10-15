@@ -5,7 +5,8 @@ every migrate.
 
 from __future__ import annotations
 
-from typing import Any
+import sys
+from typing import Any, TextIO
 
 from django.core.exceptions import ImproperlyConfigured
 from django.db import connections, transaction
@@ -14,17 +15,24 @@ from psycopg import sql as pg_sql
 from django_mcpz.sql.conf import Reader, get_readers, quote_name
 
 
-def sync_readers(using: str, **kwargs: Any) -> None:
+def sync_readers(
+    using: str, verbosity: int = 1, stdout: TextIO | None = None, **kwargs: Any
+) -> None:
     """
     The post_migrate handler, syncing the grants of the readers maintained
     by the database alias just migrated.
     """
     for reader in get_readers():
         if reader.using == using:
-            sync_grants(reader)
+            missing = sync_grants(reader)
+            if missing and verbosity >= 1:
+                (stdout or sys.stdout).write(
+                    f"  Granted {reader.alias!r} no access to these, missing"
+                    f" from the database: {', '.join(missing)}.\n"
+                )
 
 
-def sync_grants(reader: Reader) -> None:
+def sync_grants(reader: Reader) -> list[str]:
     """
     Make the reader's role able to SELECT exactly its tables' columns, and
     nothing else.
@@ -80,21 +88,22 @@ def sync_grants(reader: Reader) -> None:
                         pg_sql.SQL(relation), role_id
                     )
                 )
+            missing: list[str] = []
             for table in reader.tables:
-                cursor.execute(
-                    "SELECT to_regclass(%s)::text, n.nspname FROM pg_class c"
-                    " JOIN pg_namespace n ON n.oid = c.relnamespace"
-                    " WHERE c.oid = to_regclass(%s)",
-                    [quote_name(table.name), quote_name(table.name)],
-                )
+                cursor.execute(_TABLE_SQL, [quote_name(table.name)])
                 row = cursor.fetchone()
                 if row is None:
-                    raise ImproperlyConfigured(
-                        f"Can't find the table {table.name!r} for the"
-                        f" {reader.alias!r} reader. Create it, or its view, in"
-                        " a migration."
-                    )
-                relation, schema = row
+                    missing.append(table.name)
+                    continue
+                relation, schema, existing = row
+                columns = [column for column in table.columns if column in existing]
+                missing.extend(
+                    f"{table.name}.{column}"
+                    for column in table.columns
+                    if column not in existing
+                )
+                if not columns:
+                    continue
                 cursor.execute(
                     pg_sql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(
                         pg_sql.Identifier(schema), role_id
@@ -103,12 +112,29 @@ def sync_grants(reader: Reader) -> None:
                 cursor.execute(
                     pg_sql.SQL("GRANT SELECT ({}) ON TABLE {} TO {}").format(
                         pg_sql.SQL(", ").join(
-                            [pg_sql.Identifier(column) for column in table.columns]
+                            [pg_sql.Identifier(column) for column in columns]
                         ),
                         pg_sql.SQL(relation),
                         role_id,
                     )
                 )
+    return missing
+
+
+# A table or view, by name, with its schema and current columns.
+_TABLE_SQL = """
+SELECT
+    c.oid::regclass::text,
+    n.nspname,
+    ARRAY(
+        SELECT attname::text
+        FROM pg_attribute
+        WHERE attrelid = c.oid AND attnum > 0 AND NOT attisdropped
+    )
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE c.oid = to_regclass(%s)
+"""
 
 
 # Tables, views, and so on, where the role holds privileges on the relation

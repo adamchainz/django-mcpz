@@ -149,8 +149,7 @@ def resolve_tables(
                 )
             if name in chosen:
                 raise ImproperlyConfigured(
-                    f"{where}['tables'][{label!r}] has {field_name!r} more"
-                    " than once."
+                    f"{where}['tables'][{label!r}] has {field_name!r} more than once."
                 )
             chosen.add(name)
         fields = tuple(
