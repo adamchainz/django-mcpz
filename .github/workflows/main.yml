@@ -17,20 +17,6 @@ jobs:
     name: Python ${{ matrix.python-version }}
     runs-on: ubuntu-24.04
 
-    services:
-      # For the SQL tools tests.
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_PASSWORD: postgres
-        ports:
-        - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 2s
-          --health-timeout 5s
-          --health-retries 10
-
     strategy:
       matrix:
         python-version:
@@ -44,6 +30,9 @@ jobs:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         persist-credentials: false
+
+    - name: Start PostgreSQL
+      run: docker compose up -d --wait
 
     - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
       with:

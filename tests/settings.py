@@ -1,20 +1,20 @@
 from __future__ import annotations
 
-import os
 from typing import Any
 
 SECRET_KEY = "NOTASECRET"
 
 ALLOWED_HOSTS: list[str] = []
 
-# PostgreSQL, for the SQL tools, is used only by the tests that need it.
+# PostgreSQL, for the SQL tools, is used only by the tests that need it. It
+# matches compose.yaml, so start it with: docker compose up -d --wait
 POSTGRES: dict[str, Any] = {
     "ENGINE": "django.db.backends.postgresql",
     "NAME": "mcpz",
-    "HOST": os.environ.get("PGHOST", "localhost"),
-    "PORT": os.environ.get("PGPORT", "5432"),
-    "USER": os.environ.get("PGUSER", "postgres"),
-    "PASSWORD": os.environ.get("PGPASSWORD", "postgres"),
+    "HOST": "localhost",
+    "PORT": "55432",
+    "USER": "postgres",
+    "PASSWORD": "postgres",
     # Set up without the default database, for tests that use only these.
     "TEST": {"DEPENDENCIES": []},
 }

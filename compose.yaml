@@ -1,0 +1,20 @@
+# PostgreSQL for the tests and the example project, on a non-default port so
+# it doesn't clash with any local installation. Start it with:
+#
+#   docker compose up -d --wait
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      # For the example project. Tests create their own database.
+      POSTGRES_DB: mcpizza
+    ports:
+    - 127.0.0.1:55432:5432
+    healthcheck:
+      test: [CMD, pg_isready, --username, postgres]
+      interval: 2s
+      timeout: 5s
+      retries: 15
