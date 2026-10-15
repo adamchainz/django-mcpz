@@ -13,6 +13,8 @@ Unreleased
 * Add ``django_mcpz.sql.add_sql_tools()``, which adds tools letting a model run read-only SQL queries against chosen PostgreSQL views, plus describe them.
 
 * Add ``django_mcpz.sql.add_sql_tools()``, which adds tools letting a model run read-only SQL queries against chosen PostgreSQL tables, views, and columns, plus describe them.
+
+* Add ``django_mcpz.sql.add_sql_tools()``, which adds tools letting an LLM run read-only SQL queries against chosen columns of PostgreSQL tables and views, plus describe them.
   ``django_mcpz.sql.sync_sql_grants()`` maintains the database role the queries run as.
   See :doc:`sql`.
 

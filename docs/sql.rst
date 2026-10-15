@@ -1,104 +1,92 @@
-SQL queries
-===========
+SQL tools
+=========
 
 .. currentmodule:: django_mcpz.sql
 
-Language models write good SQL.
-Rather than writing a tool for every question someone might ask of your data, you can let the model query it directly, with :func:`add_sql_tools`, which adds two tools to a server:
+LLMs write good SQL.
+Rather than writing a tool for every question someone might ask of your data, you can let the LLM query it directly, with :func:`add_sql_tools`, which adds two tools to a server:
 
-* ``sql_schema`` lists the tables the model may query, then describes the columns of the ones it picks, as ``CREATE TABLE`` statements with comments.
+* ``sql_schema`` lists the tables the LLM may query, then describes the columns of the ones it picks, as ``CREATE TABLE`` statements with comments.
 * ``sql_query`` runs one read-only ``SELECT`` statement and returns the rows.
 
 This works with PostgreSQL only, through `psycopg 3 <https://www.psycopg.org/psycopg3/>`__.
 
-Never give the model your application’s database role.
-The model writes the SQL, and the SQL may come from whoever it is talking to, and whatever text it has read, so treat it as untrusted.
-The tools are designed for a dedicated PostgreSQL role that can read chosen tables, views, and columns, and nothing else.
+Never give the LLM your application’s database role.
+The LLM writes the SQL, and the SQL may come from whoever it is talking to, and whatever text it has read, so treat it as untrusted.
+The tools are designed for a dedicated PostgreSQL role that can read chosen columns of chosen tables and views, and nothing else.
 
 Setup
 -----
 
-The setup takes four steps: models describing what to expose, a database alias for the role, a ``post_migrate`` handler that maintains the role, and the tools.
+The setup takes four steps: choosing the columns to expose, a database alias for the role, a ``post_migrate`` handler that maintains the role, and the tools.
 
-1. Choose what to expose, as a list of models.
-   Each model’s table, and only the columns of its fields, become readable:
+1. Choose the columns to expose, as a list of pairs of a model and the names of its fields:
 
-   * **A whole table:** use your existing model.
-     Every column of its table is exposed.
+   .. code-block:: python
 
-   * **Some columns of a table:** define an unmanaged model with the same ``db_table`` and only the fields to expose.
-     Columns without a field stay unreadable, such as ``requests`` here:
+       REPORT_TABLES = [
+           (Pizza, ("id", "name", "price", "vegetarian")),
+           (Order, ("id", "pizza_id", "quantity", "total", "placed_at")),
+       ]
 
-     .. code-block:: python
+   Each field is a column of the model’s table, named by the field’s name, or, for foreign keys, its attribute name, like ``pizza_id``.
+   Only the named columns are exposed, so adding a field to a model later never exposes its column, such as ``Order.requests`` here, which holds customers’ free text.
 
-         class OrderSummary(models.Model):
-             """
-             One row per order, without the customer’s requests.
-             """
+   Exposing some columns of tables works for many cases.
+   To expose some rows, derived values, or joins, create a view, such as in a migration with |RunSQL|__, define an unmanaged model for it, and list that.
+   Views run with the privileges of their owner, so the role needs no access to the tables behind them.
+   They also make a stable interface, which the LLM can learn, decoupled from your tables.
+   For example, the example project exposes whether each order has requests, but not their text:
 
-             id = models.BigIntegerField(primary_key=True)
-             pizza = models.ForeignKey(Pizza, on_delete=models.DO_NOTHING)
-             quantity = models.PositiveSmallIntegerField()
-             placed_at = models.DateTimeField()
+   .. code-block:: python
 
-             class Meta:
-                 managed = False
-                 db_table = "pizzeria_order"
+       migrations.RunSQL(
+           """
+           CREATE VIEW pizzeria_report_order_line AS
+           SELECT
+               id,
+               pizza_id,
+               quantity,
+               total,
+               placed_at,
+               requests <> '' AS has_requests,
+               channel
+           FROM pizzeria_order
+           """,
+           "DROP VIEW pizzeria_report_order_line",
+       )
 
-   * **Some rows, or derived columns:** create a view, such as in a migration with |RunSQL|__, and define an unmanaged model for it.
-     Views run with the privileges of their owner, so the role needs no access to the tables behind them.
-     They also make a stable interface, which the model can learn, decoupled from your tables.
-     For example, the example project exposes whether each order has requests, but not their text:
+   .. code-block:: python
 
-     .. code-block:: python
+       class OrderLine(models.Model):
+           """
+           One row per order. The customer’s free-text requests are not exposed,
+           only whether there were any.
+           """
 
-         migrations.RunSQL(
-             """
-             CREATE VIEW pizzeria_report_order_line AS
-             SELECT
-                 id,
-                 pizza_id,
-                 quantity,
-                 total,
-                 placed_at,
-                 requests <> '' AS has_requests,
-                 channel
-             FROM pizzeria_order
-             """,
-             "DROP VIEW pizzeria_report_order_line",
-         )
+           id = models.BigIntegerField(primary_key=True)
+           pizza = models.ForeignKey(MenuItem, on_delete=models.DO_NOTHING)
+           quantity = models.PositiveSmallIntegerField()
+           total = models.DecimalField(
+               max_digits=7,
+               decimal_places=2,
+               help_text="Price paid for the whole order, in pounds.",
+           )
+           ...
 
-     .. code-block:: python
-
-         class OrderLine(models.Model):
-             """
-             One row per order. The customer’s free-text requests are not exposed,
-             only whether there were any.
-             """
-
-             id = models.BigIntegerField(primary_key=True)
-             pizza = models.ForeignKey(MenuItem, on_delete=models.DO_NOTHING)
-             quantity = models.PositiveSmallIntegerField()
-             total = models.DecimalField(
-                 max_digits=7,
-                 decimal_places=2,
-                 help_text="Price paid for the whole order, in pounds.",
-             )
-             ...
-
-             class Meta:
-                 managed = False
-                 db_table = "pizzeria_report_order_line"
+           class Meta:
+               managed = False
+               db_table = "pizzeria_report_order_line"
 
    .. |RunSQL| replace:: ``RunSQL``
    __ https://docs.djangoproject.com/en/stable/ref/migration-operations/#runsql
 
-   The models also drive the ``sql_schema`` tool, so document them for the model reading it:
+   The models and fields also drive the ``sql_schema`` tool, so document them for the LLM reading it:
 
    * The model’s docstring, or its |db_table_comment|__, describes the table.
    * Each field’s |db_comment|__, or its ``help_text``, describes the column, as does its verbose name when it’s not just the field name with spaces.
    * Fields with ``choices`` list their values and labels.
-   * Foreign keys to other models in the list become ``REFERENCES``, showing the model how to join.
+   * Foreign keys to exposed columns of other tables in the list become ``REFERENCES``, showing the LLM how to join.
 
    .. |db_table_comment| replace:: ``db_table_comment``
    __ https://docs.djangoproject.com/en/stable/ref/models/options/#db-table-comment
@@ -132,7 +120,7 @@ The setup takes four steps: models describing what to expose, a database alias f
 
    If you use a `database router <https://docs.djangoproject.com/en/stable/topics/db/multi-db/#database-routers>`__, make sure it doesn’t send migrations to this alias.
 
-3. Maintain the role’s grants with :func:`sync_sql_grants`, from a |post_migrate|__ handler, so they follow your models as they change:
+3. Maintain the role’s grants with :func:`sync_sql_grants`, from a |post_migrate|__ handler, so they follow your list as it changes:
 
    .. |post_migrate| replace:: ``post_migrate``
    __ https://docs.djangoproject.com/en/stable/ref/signals/#post-migrate
@@ -152,11 +140,11 @@ The setup takes four steps: models describing what to expose, a database alias f
 
        def sync_mcp_reader(using, **kwargs):
            from django_mcpz.sql import sync_sql_grants
-           from example.models import MenuItem, OrderLine
+           from example.mcp import REPORT_TABLES
 
            if using == "default":
                sync_sql_grants(
-                   models=[MenuItem, OrderLine],
+                   tables=REPORT_TABLES,
                    reader="mcp_reader",
                    using=using,
                )
@@ -165,14 +153,14 @@ The setup takes four steps: models describing what to expose, a database alias f
 
    * creates the role if it doesn’t exist, with the alias’s ``PASSWORD``;
    * grants it ``CONNECT`` on the database and ``USAGE`` on the tables’ schemas;
-   * revokes everything previously granted to it on tables and columns, then grants ``SELECT`` on exactly the columns of the models’ fields.
+   * revokes everything previously granted to it on tables and columns, then grants ``SELECT`` on exactly the listed columns.
 
    It all happens in one transaction, so the role never sees a half-way state.
    The ``default`` connection’s role needs permission to create roles, or create the role yourself beforehand, and must own the tables, or be able to grant on them.
    It also runs when the test runner creates the test database, so the role has its grants there too.
 
-   Use the same list of models here and for the tools.
-   With column-level grants, ``SELECT *`` on a table with unexposed columns fails with “permission denied”, but the schema lists only the exposed columns, so models name them instead.
+   Use the same list here and for the tools.
+   With column-level grants, ``SELECT *`` on a table with unexposed columns fails with “permission denied”, but the schema lists only the exposed columns, so the LLM names them instead.
 
    Don’t make the role a member of any other role, which it could switch to with ``SET ROLE``.
    Each query checks that the login role isn’t a superuser, can’t bypass row-level security, and isn’t a member of other roles, failing with ``ImproperlyConfigured`` otherwise.
@@ -182,11 +170,10 @@ The setup takes four steps: models describing what to expose, a database alias f
    .. code-block:: python
 
        from django_mcpz.sql import add_sql_tools
-       from example.models import MenuItem, OrderLine
 
        add_sql_tools(
            server,
-           models=[MenuItem, OrderLine],
+           tables=REPORT_TABLES,
            using="mcp_reader",
            context="MCPizza's sales data. Prices and totals are in pounds (GBP).",
        )
@@ -196,11 +183,11 @@ The setup takes four steps: models describing what to expose, a database alias f
 
 In tests, the mirrored alias is still a separate connection, which sees only committed data, so test the tools with ``TransactionTestCase`` rather than ``TestCase``.
 
-What the model sees
--------------------
+What the LLM sees
+-----------------
 
-``sql_schema`` works in two steps, so a large schema doesn’t fill the model’s context up front.
-Called without arguments, it lists the tables, each with its description from the model.
+``sql_schema`` works in two steps, so a large schema doesn’t fill the LLM’s context up front.
+Called without arguments, it lists the tables, each with its description from its model.
 For the example project:
 
 .. code-block:: text
@@ -215,7 +202,7 @@ For the example project:
 
     Call sql_schema with tables to see their columns.
 
-The model then calls it again with the tables it needs, such as ``{"tables": ["pizzeria_report_order_line"]}``, and gets their columns as SQL, the format models know best for describing tables:
+The LLM then calls it again with the tables it needs, such as ``{"tables": ["pizzeria_report_order_line"]}``, and gets their columns as SQL, the format LLMs know best for describing tables:
 
 .. code-block:: sql
 
@@ -229,12 +216,12 @@ The model then calls it again with the tables it needs, such as ``{"tables": ["p
       channel varchar(10) NOT NULL  -- Values: 'web' = Website, 'phone' = Telephone, 'mcp' = An AI assistant, over MCP.
     );
 
-So the table descriptions are the model’s guide to which tables to look at: keep them short, but say what a row is.
+So the table descriptions are the LLM’s guide to which tables to look at: keep them short, but say what a row is.
 
 Views are shown as tables too, since the difference doesn’t matter for reading them.
 
 The time zone line in the table list comes from Django: with |USE_TZ|__ enabled, connections use UTC.
-If your users think in another time zone, say so in ``context``, so the model knows to convert with ``AT TIME ZONE`` for questions like “orders per day”.
+If your users think in another time zone, say so in ``context``, so the LLM knows to convert with ``AT TIME ZONE`` for questions like “orders per day”.
 
 .. |USE_TZ| replace:: ``USE_TZ``
 __ https://docs.djangoproject.com/en/stable/ref/settings/#std-setting-USE_TZ
@@ -252,16 +239,16 @@ This is nearly as compact as CSV, which saves only around 10–15% on typical re
 Decimals are numbers, except NaN and infinities, which are strings, as JSON has no numbers for them.
 Dates and times are ISO 8601 strings, ``json`` and ``jsonb`` columns are nested JSON, and other types, like ranges, are in their PostgreSQL text form.
 
-When rows are left out, the result adds ``"truncated": true`` and a ``"note"`` telling the model to aggregate or filter.
+When rows are left out, the result adds ``"truncated": true`` and a ``"note"`` telling the LLM to aggregate or filter.
 Rows are left out past ``max_rows``, or when the result would exceed ``max_size``.
-Long values are shortened too, to a fair share of ``max_size``, so a single huge value can’t flood the model’s context.
+Long values are shortened too, to a fair share of ``max_size``, so a single huge value can’t flood the LLM’s context.
 
-Errors in the query, such as syntax errors, unknown columns, and permission denied, are returned to the model as tool errors, with PostgreSQL’s message, so it can correct itself.
+Errors in the query, such as syntax errors, unknown columns, and permission denied, are returned to the LLM as tool errors, with PostgreSQL’s message, so it can correct itself.
 
 Security
 --------
 
-The PostgreSQL role is the security boundary: the model can read whatever the role can.
+The PostgreSQL role is the security boundary: the LLM can read whatever the role can.
 The tools add more limits on top:
 
 * Each query runs in a ``READ ONLY`` transaction, which is always rolled back.

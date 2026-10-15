@@ -88,24 +88,3 @@ class Child(Parent):
 
     class Meta:
         managed = False
-
-
-class WidgetName(models.Model):
-    # Some columns of the widgets table, for column-level grants.
-    id = models.BigIntegerField(primary_key=True)
-    name = models.CharField(max_length=100)
-    nothing = NoColumnField()
-
-    class Meta:
-        managed = False
-        db_table = "tests_widget"
-
-
-class WidgetPrice(models.Model):
-    # More columns of the same table, merged with WidgetName's.
-    id = models.BigIntegerField(primary_key=True)
-    price = models.DecimalField(max_digits=6, decimal_places=2)
-
-    class Meta:
-        managed = False
-        db_table = "tests_widget"

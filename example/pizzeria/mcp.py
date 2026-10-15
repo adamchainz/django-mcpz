@@ -301,12 +301,34 @@ def menu_link(request: HttpRequest, params: MenuLinkParams) -> ResourceLink:
     )
 
 
+# The columns the SQL tools expose, which the post_migrate handler in
+# pizzeria.apps grants the reader role. Fields not named here stay hidden,
+# even if they are added to the models later.
+REPORT_TABLES = [
+    (
+        MenuItem,
+        ("id", "name", "price", "vegetarian", "available_from", "available_until"),
+    ),
+    (
+        OrderLine,
+        (
+            "id",
+            "pizza_id",
+            "quantity",
+            "total",
+            "placed_at",
+            "has_requests",
+            "channel",
+        ),
+    ),
+]
+
 if "reader" in settings.DATABASES:
     # Ad hoc reporting over the read-only views, for questions the other tools
     # don't answer, like "which pizza sold best last month?"
     add_sql_tools(
         server,
-        models=[MenuItem, OrderLine],
+        tables=REPORT_TABLES,
         using="reader",
         context="MCPizza's sales data. Prices and totals are in pounds (GBP).",
     )

@@ -16,7 +16,7 @@ class TestsConfig(AppConfig):
 
 def sync_reader(using: str, **kwargs: Any) -> None:
     from django_mcpz.sql import sync_sql_grants
-    from tests.models import WidgetView
+    from tests.mcp import SQL_TABLES
 
     if connections[using].vendor == "postgresql":
-        sync_sql_grants(models=[WidgetView], reader="reader", using=using)
+        sync_sql_grants(tables=SQL_TABLES, reader="reader", using=using)

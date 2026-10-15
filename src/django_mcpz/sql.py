@@ -1,6 +1,6 @@
 """
-Tools that let a language model run read-only SQL queries against PostgreSQL,
-limited to the tables, typically views, of a list of models.
+Tools that let an LLM run read-only SQL queries against PostgreSQL, limited to
+chosen columns of chosen tables and views.
 """
 
 from __future__ import annotations
@@ -9,12 +9,13 @@ import math
 import re
 import time
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Annotated, Any
 
 import msgspec
 import msgspec.json
-from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import FieldDoesNotExist, ImproperlyConfigured
 from django.db import connections, transaction
 from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.models import CompositePrimaryKey, Field, Model
@@ -103,7 +104,7 @@ class SQLQueryParams(msgspec.Struct):
 def add_sql_tools(
     server: MCPServer,
     *,
-    models: Sequence[type[Model]],
+    tables: Sequence[tuple[type[Model], Sequence[str]]],
     using: str,
     context: str | None = None,
     max_rows: int = 1000,
@@ -113,9 +114,10 @@ def add_sql_tools(
     permission: Callable[[HttpRequest], bool] | str | None = None,
 ) -> None:
     """
-    Add two tools to the server: one listing the tables of the given models,
-    or describing the columns of some, as SQL, and one running a read-only
-    query against them.
+    Add two tools to the server: one listing the tables, or describing the
+    columns of some, as SQL, and one running a read-only query against them.
+    Tables are given as pairs of a model and the names of the fields to
+    expose, as columns of its table.
 
     The queries run on the database connection named by using, which should
     log in as a PostgreSQL role that may only SELECT from those tables. That
@@ -136,8 +138,7 @@ def add_sql_tools(
         )
     if psycopg is None:  # pragma: no cover
         raise ImproperlyConfigured("add_sql_tools() needs psycopg 3.")
-    if not models:
-        raise ImproperlyConfigured("add_sql_tools() needs at least one model.")
+    table_list = _resolve_tables(tables, connection, "add_sql_tools")
     if max_rows < 1:
         raise ImproperlyConfigured("max_rows must be at least 1.")
     if max_size < 1000:
@@ -145,7 +146,6 @@ def add_sql_tools(
     if timeout <= 0:
         raise ImproperlyConfigured("timeout must be positive.")
 
-    model_list = list(models)
     schema_name = f"{name_prefix}_schema"
     query_name = f"{name_prefix}_query"
 
@@ -165,9 +165,9 @@ def add_sql_tools(
     def sql_schema(request: HttpRequest, params: SQLSchemaParams) -> str:
         if not params.tables:
             return list_tables(
-                model_list, using=using, context=context, schema_tool=schema_name
+                table_list, using=using, context=context, schema_tool=schema_name
             )
-        by_name = {model._meta.db_table: model for model in model_list}
+        by_name = {table.name: table for table in table_list}
         # Accept names as the model would write them in SQL, quoted or not.
         names = [name.strip().strip('"').replace('""', '"') for name in params.tables]
         unknown = [name for name in names if name not in by_name]
@@ -177,10 +177,10 @@ def add_sql_tools(
                 " Available tables:"
                 f" {', '.join(quote_name(n) for n in by_name)}."
             )
-        return describe_models(
+        return describe_tables(
             [by_name[name] for name in dict.fromkeys(names)],
             using=using,
-            all_models=model_list,
+            all_tables=table_list,
         )
 
     @server.tool(
@@ -449,21 +449,21 @@ def _shorten(value: Any, max_value: int) -> tuple[Any, bool]:
 
 def sync_sql_grants(
     *,
-    models: Sequence[type[Model]],
+    tables: Sequence[tuple[type[Model], Sequence[str]]],
     reader: str,
     using: str = "default",
 ) -> None:
     """
     Make the role that the reader database alias logs in as able to SELECT
-    exactly the columns of the models' tables, and nothing else.
+    exactly the given columns, and nothing else. Tables are given as for
+    add_sql_tools(), as pairs of a model and the names of its fields.
 
     Run on the using connection, typically from a post_migrate handler, so
-    grants follow the models as they change. This creates the role if it's
+    grants follow the code as it changes. This creates the role if it's
     missing, with the alias's password, grants it CONNECT on the database
     and USAGE on the tables' schemas, revokes everything it was granted on
-    other tables and columns, then grants SELECT on each model's columns.
-    It all happens in one transaction, so the role never sees a half-way
-    state.
+    tables and columns, then grants SELECT on the given columns. It all
+    happens in one transaction, so the role never sees a half-way state.
     """
     connection = connections[using]
     if connection.vendor != "postgresql":
@@ -481,9 +481,9 @@ def sync_sql_grants(
     if role == connection.settings_dict["USER"]:
         raise ImproperlyConfigured(
             f"The {reader!r} and {using!r} database aliases log in as the same"
-            f" role, {role!r}, so it can't be limited to reading the models."
+            f" role, {role!r}, so it can't be limited to reading the tables."
         )
-    wanted = _wanted_columns(models, connection)
+    table_list = _resolve_tables(tables, connection, "sync_sql_grants")
     with transaction.atomic(using=using):
         connection.ensure_connection()
         pg_connection = connection.connection
@@ -510,17 +510,17 @@ def sync_sql_grants(
                         pg_sql.SQL(relation), role_id
                     )
                 )
-            for table, columns in wanted.items():
+            for table in table_list:
                 cursor.execute(
                     "SELECT to_regclass(%s)::text, n.nspname FROM pg_class c"
                     " JOIN pg_namespace n ON n.oid = c.relnamespace"
                     " WHERE c.oid = to_regclass(%s)",
-                    [quote_name(table), quote_name(table)],
+                    [quote_name(table.name), quote_name(table.name)],
                 )
                 row = cursor.fetchone()
                 if row is None:
                     raise ImproperlyConfigured(
-                        f"sync_sql_grants() can't find the table {table!r}."
+                        f"sync_sql_grants() can't find the table {table.name!r}."
                         " Create it, or its view, in a migration."
                     )
                 relation, schema = row
@@ -531,7 +531,9 @@ def sync_sql_grants(
                 )
                 cursor.execute(
                     pg_sql.SQL("GRANT SELECT ({}) ON TABLE {} TO {}").format(
-                        pg_sql.SQL(", ").join(map(pg_sql.Identifier, columns)),
+                        pg_sql.SQL(", ").join(
+                            [pg_sql.Identifier(column) for column in table.columns]
+                        ),
                         pg_sql.SQL(relation),
                         role_id,
                     )
@@ -560,41 +562,98 @@ ORDER BY 1
 """
 
 
-def _wanted_columns(
-    models: Sequence[type[Model]], connection: BaseDatabaseWrapper
-) -> dict[str, list[str]]:
+@dataclass(frozen=True)
+class _Table:
+    """A model's table, and the fields exposed as its columns."""
+
+    model: type[Model]
+    fields: tuple[Field[Any, Any], ...]
+
+    @property
+    def name(self) -> str:
+        return self.model._meta.db_table
+
+    @property
+    def columns(self) -> list[str]:
+        return [field.column for field in self.fields if field.column]
+
+
+def _resolve_tables(
+    tables: Sequence[tuple[type[Model], Sequence[str]]],
+    connection: BaseDatabaseWrapper,
+    function: str,
+) -> list[_Table]:
     """
-    The columns of each model's table, merging models that share a table, as
-    unmanaged models exposing different columns of one table may.
+    Check the pairs of a model and field names, returning their fields in
+    the model's order. Every field must be named, so adding a field to a
+    model never exposes its column.
     """
-    wanted: dict[str, list[str]] = {}
-    for model in models:
-        columns = wanted.setdefault(model._meta.db_table, [])
-        for field in model._meta.local_concrete_fields:
-            column = field.column
-            if (
-                column is not None
-                and _db_type(field, connection) is not None
-                and column not in columns
-            ):
-                columns.append(column)
-    return wanted
+    if not tables:
+        raise ImproperlyConfigured(f"{function}() needs at least one table.")
+    result: list[_Table] = []
+    names: set[str] = set()
+    for model, field_names in tables:
+        opts = model._meta
+        label = opts.label
+        if isinstance(field_names, str):
+            raise ImproperlyConfigured(
+                f"{function}() needs a sequence of field names for {label},"
+                f" not the string {field_names!r}."
+            )
+        if not field_names:
+            raise ImproperlyConfigured(
+                f"{function}() needs at least one field name for {label}."
+            )
+        if opts.db_table in names:
+            raise ImproperlyConfigured(
+                f"{function}() got the table {opts.db_table!r} more than once."
+                " List all its fields together."
+            )
+        names.add(opts.db_table)
+        # Local fields only, since a multi-table inheritance child's table
+        # holds only its own columns, plus the link to its parent.
+        columns = {
+            field.name: field
+            for field in opts.local_concrete_fields
+            if _db_type(field, connection) is not None
+        }
+        chosen: set[str] = set()
+        for field_name in field_names:
+            try:
+                field = opts.get_field(field_name)
+            except FieldDoesNotExist:
+                raise ImproperlyConfigured(
+                    f"{function}() got {field_name!r}, which isn't a field of {label}."
+                ) from None
+            if columns.get(field.name) is not field:
+                raise ImproperlyConfigured(
+                    f"{function}() got {field_name!r}, which isn't a column of"
+                    f" {label}'s table."
+                )
+            if field.name in chosen:
+                raise ImproperlyConfigured(
+                    f"{function}() got {field_name!r} more than once for {label}."
+                )
+            chosen.add(field.name)
+        fields = tuple(field for name, field in columns.items() if name in chosen)
+        result.append(_Table(model, fields))
+    return result
 
 
 # Schema description
 
 
 def list_tables(
-    model_list: Sequence[type[Model]],
+    table_list: Sequence[_Table],
     *,
     using: str,
     context: str | None = None,
     schema_tool: str = "sql_schema",
 ) -> str:
     """
-    List the tables of the models, each with its description, from the
-    model's db_table_comment or docstring, plus the context and anything else
-    that applies to every query.
+    List the tables, each with its description, from the model's
+    db_table_comment or docstring, plus the context and anything else that
+    applies to every query.
     """
     connection = connections[using]
     parts = []
@@ -605,9 +664,9 @@ def list_tables(
         " applies to date functions on timestamp with time zone columns."
     )
     lines = ["Tables:"]
-    for model in model_list:
-        line = f"- {quote_name(model._meta.db_table)}"
-        description = _table_description(model)
+    for table in table_list:
+        line = f"- {quote_name(table.name)}"
+        description = _table_description(table.model)
         if description:
             line += f": {' '.join(description.split())}"
         lines.append(line)
@@ -616,21 +675,21 @@ def list_tables(
     return "\n\n".join(parts) + "\n"
 
 
-def describe_models(
-    model_list: Sequence[type[Model]],
+def describe_tables(
+    table_list: Sequence[_Table],
     *,
     using: str,
-    all_models: Sequence[type[Model]] | None = None,
+    all_tables: Sequence[_Table] | None = None,
 ) -> str:
     """
-    Describe the tables of the models as CREATE TABLE statements, with
-    comments from each model's db_table_comment or docstring, and each
-    field's db_comment or help_text, verbose name, and choices. Foreign keys
-    to tables of all_models, by default the same models, get REFERENCES.
+    Describe the tables as CREATE TABLE statements, with comments from each
+    model's db_table_comment or docstring, and each field's db_comment or
+    help_text, verbose name, and choices. Foreign keys to exposed columns of
+    all_tables, by default the same tables, get REFERENCES.
     """
     connection = connections[using]
-    tables = {model._meta.db_table for model in (all_models or model_list)}
-    parts = [_describe_model(model, connection, tables) for model in model_list]
+    exposed = {table.name: set(table.columns) for table in (all_tables or table_list)}
+    parts = [_describe_table(table, connection, exposed) for table in table_list]
     return "\n\n".join(parts) + "\n"
 
 
@@ -638,35 +697,34 @@ def _table_description(model: type[Model]) -> str:
     return model._meta.db_table_comment or _docstring(model)
 
 
-def _describe_model(
-    model: type[Model], connection: BaseDatabaseWrapper, tables: set[str]
+def _describe_table(
+    table: _Table, connection: BaseDatabaseWrapper, exposed: dict[str, set[str]]
 ) -> str:
-    opts = model._meta
+    opts = table.model._meta
     lines = []
-    description = _table_description(model)
+    description = _table_description(table.model)
     if description:
         lines.append(_comment(description))
     lines.append(f"CREATE TABLE {quote_name(opts.db_table)} (")
     columns = []
-    # Local fields, since a multi-table inheritance child's table holds only
-    # its own, plus the link to its parent.
-    for field in opts.local_concrete_fields:
-        db_type = _db_type(field, connection)
-        if db_type is None:
-            continue
-        column = f"  {_quote_column(field)} {db_type}"
+    for field in table.fields:
+        column = f"  {_quote_column(field)} {_db_type(field, connection)}"
         if not field.null:
             column += " NOT NULL"
         if field.primary_key:
             column += " PRIMARY KEY"
-        if field.is_relation and field.related_model._meta.db_table in tables:  # type: ignore[union-attr]
-            target = field.target_field  # type: ignore[attr-defined]
+        target = field.target_field if field.is_relation else None  # type: ignore[attr-defined]
+        if target is not None and target.column in exposed.get(
+            target.model._meta.db_table, ()
+        ):
             column += (
                 f" REFERENCES {quote_name(target.model._meta.db_table)}"
                 f" ({_quote_column(target)})"
             )
         columns.append((column, _field_notes(field)))
-    if isinstance(opts.pk, CompositePrimaryKey):
+    if isinstance(opts.pk, CompositePrimaryKey) and all(
+        field in table.fields for field in opts.pk.fields
+    ):
         pk_columns = ", ".join(_quote_column(field) for field in opts.pk.fields)
         columns.append((f"  PRIMARY KEY ({pk_columns})", ""))
     for i, (column, notes) in enumerate(columns):

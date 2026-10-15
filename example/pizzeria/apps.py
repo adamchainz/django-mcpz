@@ -21,7 +21,7 @@ def sync_reader(using: str, **kwargs: Any) -> None:
     views, and nothing else.
     """
     from django_mcpz.sql import sync_sql_grants
-    from pizzeria.models import MenuItem, OrderLine
+    from pizzeria.mcp import REPORT_TABLES
 
     if "reader" in settings.DATABASES and using == "default":
-        sync_sql_grants(models=[MenuItem, OrderLine], reader="reader", using=using)
+        sync_sql_grants(tables=REPORT_TABLES, reader="reader", using=using)

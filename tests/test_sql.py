@@ -18,22 +18,24 @@ from django_mcpz.server import MCPServer, ToolError, public
 from django_mcpz.sql import (
     _fetch,
     _release_advisory_locks,
+    _resolve_tables,
     _strip_declare,
     add_sql_tools,
-    describe_models,
+    describe_tables,
     encode_result,
     list_tables,
     run_query,
     sync_sql_grants,
 )
+from tests.mcp import SQL_TABLES
 from tests.models import (
     Child,
     Pair,
+    Parent,
     Part,
     Reserved,
     Undocumented,
-    WidgetName,
-    WidgetPrice,
+    Widget,
     WidgetView,
 )
 from tests.test_server import ServerTestCase, make_message
@@ -58,62 +60,98 @@ CREATE TABLE tests_widget_view (
 );
 """
 
+PART_FIELDS = ("id", "widget_id", "sku", "size", "supplier", "rank")
+
+
+def resolve(tables):
+    return _resolve_tables(tables, connections["reader"], "test")
+
 
 class AddSQLToolsTests(SimpleTestCase):
-    def test_not_postgresql(self):
+    def add(self, **kwargs):
         server = MCPServer(name="s", version="1", auth=public)
+        add_sql_tools(server, **{"tables": SQL_TABLES, "using": "reader", **kwargs})
+        return server
+
+    def error(self, **kwargs):
         with pytest.raises(ImproperlyConfigured) as excinfo:
-            add_sql_tools(server, models=[WidgetView], using="default")
-        assert str(excinfo.value) == (
+            self.add(**kwargs)
+        return str(excinfo.value)
+
+    def test_not_postgresql(self):
+        assert self.error(using="default") == (
             "add_sql_tools() needs a PostgreSQL database, but 'default' is sqlite."
         )
 
-    def test_no_models(self):
-        server = MCPServer(name="s", version="1", auth=public)
-        with pytest.raises(ImproperlyConfigured) as excinfo:
-            add_sql_tools(server, models=[], using="reader")
-        assert str(excinfo.value) == "add_sql_tools() needs at least one model."
+    def test_no_tables(self):
+        assert self.error(tables=[]) == "add_sql_tools() needs at least one table."
+
+    def test_fields_string(self):
+        # A common slip: ("name") is a string, not a tuple.
+        assert self.error(tables=[(Widget, "name")]) == (
+            "add_sql_tools() needs a sequence of field names for tests.Widget,"
+            " not the string 'name'."
+        )
+
+    def test_no_fields(self):
+        assert self.error(tables=[(Widget, ())]) == (
+            "add_sql_tools() needs at least one field name for tests.Widget."
+        )
+
+    def test_unknown_field(self):
+        assert self.error(tables=[(Widget, ("nope",))]) == (
+            "add_sql_tools() got 'nope', which isn't a field of tests.Widget."
+        )
+
+    def test_field_without_column(self):
+        assert self.error(tables=[(Reserved, ("nothing",))]) == (
+            "add_sql_tools() got 'nothing', which isn't a column of"
+            " tests.Reserved's table."
+        )
+
+    def test_parent_field(self):
+        # The parent's fields are in its own table, not the child's.
+        assert self.error(tables=[(Child, ("name",))]) == (
+            "add_sql_tools() got 'name', which isn't a column of tests.Child's table."
+        )
+
+    def test_reverse_relation(self):
+        assert self.error(tables=[(WidgetView, ("part",))]) == (
+            "add_sql_tools() got 'part', which isn't a column of"
+            " tests.WidgetView's table."
+        )
+
+    def test_duplicate_field(self):
+        # Also by its attname.
+        assert self.error(tables=[(Part, ("widget", "widget_id"))]) == (
+            "add_sql_tools() got 'widget_id' more than once for tests.Part."
+        )
+
+    def test_duplicate_table(self):
+        assert self.error(tables=[(Widget, ("id",)), (Widget, ("name",))]) == (
+            "add_sql_tools() got the table 'tests_widget' more than once. List"
+            " all its fields together."
+        )
 
     def test_max_rows(self):
-        server = MCPServer(name="s", version="1", auth=public)
-        with pytest.raises(ImproperlyConfigured) as excinfo:
-            add_sql_tools(server, models=[WidgetView], using="reader", max_rows=0)
-        assert str(excinfo.value) == "max_rows must be at least 1."
+        assert self.error(max_rows=0) == "max_rows must be at least 1."
 
     def test_max_size(self):
-        server = MCPServer(name="s", version="1", auth=public)
-        with pytest.raises(ImproperlyConfigured) as excinfo:
-            add_sql_tools(server, models=[WidgetView], using="reader", max_size=999)
-        assert str(excinfo.value) == "max_size must be at least 1000."
+        assert self.error(max_size=999) == "max_size must be at least 1000."
 
     def test_timeout(self):
-        server = MCPServer(name="s", version="1", auth=public)
-        with pytest.raises(ImproperlyConfigured) as excinfo:
-            add_sql_tools(server, models=[WidgetView], using="reader", timeout=0)
-        assert str(excinfo.value) == "timeout must be positive."
+        assert self.error(timeout=0) == "timeout must be positive."
 
     def test_assume_role(self):
-        server = MCPServer(name="s", version="1", auth=public)
-        with (
-            mock.patch.dict(
-                connections["reader"].settings_dict["OPTIONS"], {"assume_role": "x"}
-            ),
-            pytest.raises(ImproperlyConfigured) as excinfo,
+        with mock.patch.dict(
+            connections["reader"].settings_dict["OPTIONS"], {"assume_role": "x"}
         ):
-            add_sql_tools(server, models=[WidgetView], using="reader")
-        assert str(excinfo.value).startswith(
-            "add_sql_tools() needs 'reader' to log in as the reader role,"
-        )
+            assert self.error().startswith(
+                "add_sql_tools() needs 'reader' to log in as the reader role,"
+            )
 
     def test_name_prefix_and_permission(self):
-        server = MCPServer(name="s", version="1", auth=public)
-        add_sql_tools(
-            server,
-            models=[WidgetView],
-            using="reader",
-            name_prefix="widgets",
-            permission=lambda request: False,
-        )
+        server = self.add(name_prefix="widgets", permission=lambda request: False)
         assert list(server._tools) == ["widgets_schema", "widgets_query"]
         assert not server._tools["widgets_query"].permitted(mock.Mock())
 
@@ -121,7 +159,14 @@ class AddSQLToolsTests(SimpleTestCase):
 class ListTablesTests(SimpleTestCase):
     def test_tables(self):
         assert list_tables(
-            [WidgetView, Undocumented, Reserved, Part],
+            resolve(
+                [
+                    (WidgetView, ("id",)),
+                    (Undocumented, ("id",)),
+                    (Reserved, ("id",)),
+                    (Part, ("id",)),
+                ]
+            ),
             using="reader",
             schema_tool="widgets_schema",
         ) == (
@@ -138,14 +183,27 @@ class ListTablesTests(SimpleTestCase):
         )
 
 
-class DescribeModelsTests(SimpleTestCase):
-    def test_view(self):
-        assert describe_models([WidgetView], using="reader") == SCHEMA
+class DescribeTablesTests(SimpleTestCase):
+    def describe(self, tables, **kwargs):
+        return describe_tables(resolve(tables), using="reader", **kwargs)
 
-    def test_all_models(self):
+    def test_view(self):
+        assert self.describe(SQL_TABLES) == SCHEMA
+
+    def test_some_fields(self):
+        # Only the named fields, in the model's order.
+        assert self.describe([(Widget, ("price", "name"))]) == (
+            "CREATE TABLE tests_widget (\n"
+            "  name varchar(100) NOT NULL,\n"
+            "  price numeric(6, 2) NOT NULL\n"
+            ");\n"
+        )
+
+    def test_all_tables(self):
         # References to tables outside the described ones, but queryable.
-        assert describe_models(
-            [Part], using="reader", all_models=[WidgetView, Part]
+        all_tables = resolve([*SQL_TABLES, (Part, PART_FIELDS)])
+        assert describe_tables(
+            all_tables[1:], using="reader", all_tables=all_tables
         ).splitlines()[4] == (
             "  widget_id bigint NOT NULL REFERENCES tests_widget_view (id),"
         )
@@ -153,7 +211,9 @@ class DescribeModelsTests(SimpleTestCase):
     def test_fields(self):
         # Part references WidgetView, which is described, and Widget, which is
         # not, so only the first gets a REFERENCES.
-        assert describe_models([WidgetView, Part, Undocumented], using="reader") == (
+        assert self.describe(
+            [*SQL_TABLES, (Part, PART_FIELDS), (Undocumented, ("id",))]
+        ) == (
             "-- Widgets for sale, without their stock levels.\n"
             "CREATE TABLE tests_widget_view (\n"
             "  id bigint NOT NULL PRIMARY KEY,\n"
@@ -178,10 +238,22 @@ class DescribeModelsTests(SimpleTestCase):
             ");\n"
         )
 
+    def test_reference_to_hidden_column(self):
+        # No REFERENCES when the target column isn't exposed.
+        assert (
+            self.describe([(WidgetView, ("name",)), (Part, ("widget",))]).splitlines()[
+                -2
+            ]
+            == "  widget_id bigint NOT NULL"
+        )
+
 
 class DescribeEdgeCasesTests(SimpleTestCase):
-    def test_quoting_and_no_column(self):
-        assert describe_models([Reserved], using="reader").split("\n\n")[0] == (
+    def describe(self, tables):
+        return describe_tables(resolve(tables), using="reader")
+
+    def test_quoting(self):
+        assert self.describe([(Reserved, ("id", "user", "label"))]) == (
             'CREATE TABLE "order" (\n'
             "  id bigint NOT NULL PRIMARY KEY,\n"
             '  "User" integer NOT NULL,\n'
@@ -190,7 +262,7 @@ class DescribeEdgeCasesTests(SimpleTestCase):
         )
 
     def test_composite_primary_key(self):
-        assert describe_models([Pair], using="reader").split("\n\n")[0] == (
+        assert self.describe([(Pair, ("left_id", "right_id"))]) == (
             "CREATE TABLE tests_pair (\n"
             "  left_id integer NOT NULL,\n"
             "  right_id integer NOT NULL,\n"
@@ -198,13 +270,21 @@ class DescribeEdgeCasesTests(SimpleTestCase):
             ");\n"
         )
 
+    def test_composite_primary_key_partial(self):
+        # Without all its columns, there's no primary key to describe.
+        assert self.describe([(Pair, ("left_id",))]) == (
+            "CREATE TABLE tests_pair (\n  left_id integer NOT NULL\n);\n"
+        )
+
     def test_multi_table_inheritance(self):
-        # Only the child table's own columns.
-        assert describe_models([Child], using="reader").split("\n\n")[0] == (
+        assert self.describe([(Child, ("parent_ptr", "age"))]) == (
             "CREATE TABLE tests_child (\n"
             "  parent_ptr_id bigint NOT NULL PRIMARY KEY,\n"
             "  age integer NOT NULL\n"
             ");\n"
+        )
+        assert self.describe([(Parent, ("id", "name"))]).startswith(
+            "CREATE TABLE tests_parent (\n"
         )
 
 
@@ -618,7 +698,9 @@ class RunQueryTransactionTests(TransactionTestCase):
 
     def test_table_columns(self):
         # Granted some columns of a table, the reader can read just those.
-        sync_sql_grants(models=[WidgetName], reader="reader", using="postgres")
+        sync_sql_grants(
+            tables=[(Widget, ("id", "name"))], reader="reader", using="postgres"
+        )
         try:
             assert run_query(
                 "SELECT name FROM tests_widget ORDER BY name",
@@ -639,7 +721,7 @@ class RunQueryTransactionTests(TransactionTestCase):
                 "Query error: permission denied for table tests_widget"
             )
         finally:
-            sync_sql_grants(models=[WidgetView], reader="reader", using="postgres")
+            sync_sql_grants(tables=SQL_TABLES, reader="reader", using="postgres")
 
     def test_autocommit_restored(self):
         assert run_query(
@@ -684,7 +766,7 @@ class SyncSQLGrantsTests(TestCase):
     def test_view(self):
         # As done by the post_migrate handler in tests.apps. Grants are per
         # column, so not on the table as a whole.
-        sync_sql_grants(models=[WidgetView], reader="reader", using="postgres")
+        sync_sql_grants(tables=SQL_TABLES, reader="reader", using="postgres")
         assert self.any_column_privilege("mcpz_test_reader", "tests_widget_view")
         assert not self.table_privilege("tests_widget_view")
         assert not self.table_privilege("tests_widget")
@@ -696,10 +778,11 @@ class SyncSQLGrantsTests(TestCase):
         }
 
     def test_columns(self):
-        # Columns of models sharing a table are merged, skipping any field
-        # without a column, and anything else is revoked.
+        # Just the named columns of a table, and anything else is revoked.
         sync_sql_grants(
-            models=[WidgetName, WidgetPrice], reader="reader", using="postgres"
+            tables=[(Widget, ("id", "name", "price"))],
+            reader="reader",
+            using="postgres",
         )
         assert self.column_privileges("tests_widget") == {
             "id": True,
@@ -716,7 +799,9 @@ class SyncSQLGrantsTests(TestCase):
             cursor.execute(
                 "GRANT SELECT (in_stock) ON tests_widget TO mcpz_test_reader"
             )
-        sync_sql_grants(models=[WidgetName], reader="reader", using="postgres")
+        sync_sql_grants(
+            tables=[(Widget, ("id", "name"))], reader="reader", using="postgres"
+        )
         assert not self.table_privilege("tests_widget")
         assert self.column_privileges("tests_widget") == {
             "id": True,
@@ -730,7 +815,7 @@ class SyncSQLGrantsTests(TestCase):
             connections["reader"].settings_dict,
             {"USER": "mcpz_test_new", "PASSWORD": "secret"},
         ):
-            sync_sql_grants(models=[WidgetView], reader="reader", using="postgres")
+            sync_sql_grants(tables=SQL_TABLES, reader="reader", using="postgres")
         assert self.fetch(
             "SELECT rolcanlogin, rolsuper FROM pg_roles WHERE rolname = %s",
             ["mcpz_test_new"],
@@ -739,7 +824,7 @@ class SyncSQLGrantsTests(TestCase):
 
     def test_not_postgresql(self):
         with pytest.raises(ImproperlyConfigured) as excinfo:
-            sync_sql_grants(models=[WidgetView], reader="reader", using="default")
+            sync_sql_grants(tables=SQL_TABLES, reader="reader", using="default")
         assert str(excinfo.value) == (
             "sync_sql_grants() needs a PostgreSQL database, but 'default' is sqlite."
         )
@@ -749,7 +834,7 @@ class SyncSQLGrantsTests(TestCase):
             mock.patch.dict(connections["reader"].settings_dict, {"USER": ""}),
             pytest.raises(ImproperlyConfigured) as excinfo,
         ):
-            sync_sql_grants(models=[WidgetView], reader="reader", using="postgres")
+            sync_sql_grants(tables=SQL_TABLES, reader="reader", using="postgres")
         assert str(excinfo.value) == (
             "sync_sql_grants() needs the 'reader' database alias to set USER, the"
             " role it logs in as."
@@ -757,14 +842,16 @@ class SyncSQLGrantsTests(TestCase):
 
     def test_same_user(self):
         with pytest.raises(ImproperlyConfigured) as excinfo:
-            sync_sql_grants(models=[WidgetView], reader="postgres", using="postgres")
+            sync_sql_grants(tables=SQL_TABLES, reader="postgres", using="postgres")
         assert str(excinfo.value).startswith(
             "The 'postgres' and 'postgres' database aliases log in as the same role,"
         )
 
     def test_missing_table(self):
         with pytest.raises(ImproperlyConfigured) as excinfo:
-            sync_sql_grants(models=[Undocumented], reader="reader", using="postgres")
+            sync_sql_grants(
+                tables=[(Undocumented, ("id",))], reader="reader", using="postgres"
+            )
         assert str(excinfo.value) == (
             "sync_sql_grants() can't find the table 'tests_undocumented'. Create"
             " it, or its view, in a migration."

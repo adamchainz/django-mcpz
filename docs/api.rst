@@ -334,39 +334,41 @@ For typed input schemas, whether annotated or passed explicitly as ``input_schem
 
 .. _api-sql:
 
-SQL queries
------------
+SQL tools
+---------
 
 .. currentmodule:: django_mcpz.sql
 
 As covered in :doc:`sql`.
 
-.. function:: add_sql_tools(server, *, models, using, context=None, max_rows=1000, max_size=50000, timeout=10.0, name_prefix="sql", permission=None)
+.. function:: add_sql_tools(server, *, tables, using, context=None, max_rows=1000, max_size=50000, timeout=10.0, name_prefix="sql", permission=None)
 
-    Add two tools to ``server``: ``<name_prefix>_schema``, listing the tables of ``models``, or describing the columns of some, and ``<name_prefix>_query``, running one read-only PostgreSQL query against them.
+    Add two tools to ``server``: ``<name_prefix>_schema``, listing the ``tables``, or describing the columns of some, and ``<name_prefix>_query``, running one read-only PostgreSQL query against them.
 
     :param server:
         The :class:`~django_mcpz.server.MCPServer` to add the tools to.
 
-    :param models:
-        The models whose tables the model may query: regular models, unmanaged models exposing some columns of a table, or unmanaged models for views.
-        Their documentation drives the schema tool.
-        They don’t restrict queries themselves, which is the job of the database role, maintained by :func:`sync_sql_grants`.
+    :param tables:
+        The columns the LLM may query, as a list of pairs of a model, for a table or view, and a sequence of the names of the fields to expose, such as ``[(Order, ("id", "pizza_id", "quantity"))]``.
+        Fields can be named by their name or attribute name, and must be columns of the model’s own table.
+        Each table can appear once.
+        The models’ and fields’ documentation drives the schema tool.
+        The list doesn’t restrict queries itself, which is the job of the database role, maintained by :func:`sync_sql_grants`.
 
     :param using:
-        The alias of the database connection to run queries on, which must be PostgreSQL, connecting with psycopg 3, as a role that can only read the tables of ``models``.
+        The alias of the database connection to run queries on, which must be PostgreSQL, connecting with psycopg 3, as a role that can only read the columns in ``tables``.
 
     :param context:
         Optional text shown at the top of the table list, for anything that applies across tables.
 
     :param max_rows:
         The most rows a query returns.
-        The model is told the limit and when it was hit.
+        The LLM is told the limit and when it was hit.
         ``max_size`` usually binds first, except for narrow results.
 
     :param max_size:
-        Roughly the most bytes of JSON a query returns, so results fit in the model’s context.
-        The default, around 15,000 tokens, stays under the 25,000 tokens Claude Code accepts from a tool by default, with room for the model to make several queries.
+        Roughly the most bytes of JSON a query returns, so results fit in the LLM’s context.
+        The default, around 15,000 tokens, stays under the 25,000 tokens Claude Code accepts from a tool by default, with room for the LLM to make several queries.
         Rows beyond it are left out, and long values are shortened to a fair share of it.
 
     :param timeout:
@@ -379,22 +381,22 @@ As covered in :doc:`sql`.
     :param permission:
         An optional permission for both tools, as for :meth:`~django_mcpz.server.MCPServer.tool`.
 
-    Raises ``ImproperlyConfigured`` if the database isn’t PostgreSQL, ``models`` is empty, or a limit is out of range.
+    Raises ``ImproperlyConfigured`` if the database isn’t PostgreSQL, ``tables`` is empty or names a field that isn’t a column, or a limit is out of range.
 
-.. function:: sync_sql_grants(*, models, reader, using="default")
+.. function:: sync_sql_grants(*, tables, reader, using="default")
 
-    Make the role that the ``reader`` database alias logs in as able to ``SELECT`` exactly the columns of the fields of ``models``, and nothing else.
+    Make the role that the ``reader`` database alias logs in as able to ``SELECT`` exactly the columns in ``tables``, and nothing else.
     Call it from a ``post_migrate`` handler, as covered in :doc:`sql`.
 
     Running on the ``using`` connection, in one transaction, it:
 
     * creates the role, as the alias’s ``USER``, if it doesn’t exist, with the alias’s ``PASSWORD``;
-    * grants it ``CONNECT`` on the database, and ``USAGE`` on the schemas of the models’ tables;
+    * grants it ``CONNECT`` on the database, and ``USAGE`` on the schemas of the tables;
     * revokes all its privileges on any table, view, or column;
-    * grants it ``SELECT`` on the columns of each model’s fields, merging models that share a table.
+    * grants it ``SELECT`` on the listed columns.
 
-    :param models:
-        The models to grant access to, as passed to :func:`add_sql_tools`.
+    :param tables:
+        The columns to grant access to, as passed to :func:`add_sql_tools`.
 
     :param reader:
         The alias of the database connection the tools use.
@@ -402,7 +404,7 @@ As covered in :doc:`sql`.
     :param using:
         The alias of the database connection to make the changes on, whose role needs to be able to create roles, unless the role exists, and grant on the tables.
 
-    Raises ``ImproperlyConfigured`` if the database isn’t PostgreSQL, the ``reader`` alias has no ``USER`` or the same ``USER`` as ``using``, or a model’s table doesn’t exist.
+    Raises ``ImproperlyConfigured`` if the database isn’t PostgreSQL, the ``reader`` alias has no ``USER`` or the same ``USER`` as ``using``, ``tables`` names a field that isn’t a column, or a table doesn’t exist.
 
 .. currentmodule:: django_mcpz.server
 
