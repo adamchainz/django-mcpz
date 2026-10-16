@@ -7,6 +7,9 @@ Unreleased
 
 * Drop Python 3.10 support.
 
+* Document the convention of defining MCP servers in an ``mcp`` module of an app, an ``mcp.py`` file or ``mcp`` package, alongside its ``models.py`` and ``admin.py``.
+  See :doc:`servers`.
+
 1.1.0 (2026-10-02)
 ------------------
 
