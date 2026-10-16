@@ -10,7 +10,7 @@ from typing import Any, TextIO
 
 from django.core.exceptions import ImproperlyConfigured
 from django.db import connections, transaction
-from django.urls import get_resolver
+from django.utils.module_loading import autodiscover_modules
 from psycopg import sql as pg_sql
 
 from django_mcpz.sql.readers import SQLReader, all_readers, quote_name
@@ -23,9 +23,9 @@ def sync_readers(
     The post_migrate handler, syncing the grants of the readers whose
     grantor is the database alias just migrated.
     """
-    # Readers are defined alongside the tools that use them, so import the
-    # URLconf, and with it every module routing an MCP server.
-    get_resolver().url_patterns  # noqa: B018
+    # Readers are defined alongside the tools that use them, in apps' mcp
+    # modules, so import those first, as the admin does for admin modules.
+    autodiscover_modules("mcp")
     for reader in all_readers():
         if reader.grantor == using:
             missing = sync_grants(reader)

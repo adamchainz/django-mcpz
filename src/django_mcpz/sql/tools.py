@@ -149,8 +149,6 @@ def add_sql_tools(
     if timeout <= 0:
         raise ImproperlyConfigured("timeout must be positive.")
 
-    # The tools refer to the reader, keeping it alive in the registry that
-    # the post_migrate handler syncs.
     schema_name = f"{name_prefix}_schema"
     query_name = f"{name_prefix}_query"
 

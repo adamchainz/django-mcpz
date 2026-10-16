@@ -7,7 +7,6 @@ enforce it.
 from __future__ import annotations
 
 import re
-import weakref
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -18,11 +17,8 @@ from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.models import Field, Model
 
 # Every reader defined, by database alias, for the post_migrate handler to
-# sync. Weak, so a reader lasts only as long as something uses it, such as
-# the tools from add_sql_tools().
-_readers: weakref.WeakValueDictionary[str, SQLReader] = (
-    weakref.WeakValueDictionary()
-)
+# sync, after importing each app's mcp module.
+_readers: dict[str, SQLReader] = {}
 
 
 class Table:
@@ -57,7 +53,7 @@ class SQLReader:
     model never exposes its column.
     """
 
-    __slots__ = ("using", "grantor", "tables", "__weakref__")
+    __slots__ = ("using", "grantor", "tables")
 
     using: str
     grantor: str
@@ -73,8 +69,7 @@ class SQLReader:
         for name, alias in (("using", using), ("grantor", grantor)):
             if alias not in settings.DATABASES:
                 raise ImproperlyConfigured(
-                    f"SQLReader {name}={alias!r} isn't a database alias in"
-                    " DATABASES."
+                    f"SQLReader {name}={alias!r} isn't a database alias in DATABASES."
                 )
         if using == grantor:
             raise ImproperlyConfigured(
@@ -106,7 +101,7 @@ class SQLReader:
 
 
 def all_readers() -> list[SQLReader]:
-    """Every reader defined, and still in use."""
+    """Every reader defined."""
     return list(_readers.values())
 
 
@@ -151,8 +146,7 @@ def _resolve_tables(tables: Any, connection: BaseDatabaseWrapper) -> list[Table]
                 found = opts.get_field(field_name)
             except FieldDoesNotExist:
                 raise ImproperlyConfigured(
-                    f"{where} has {field_name!r}, which isn't a field of"
-                    f" {opts.label}."
+                    f"{where} has {field_name!r}, which isn't a field of {opts.label}."
                 ) from None
             name = str(found.name)
             if columns.get(name) is not found:

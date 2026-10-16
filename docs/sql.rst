@@ -56,7 +56,7 @@ The setup takes four steps: installing the app, a database alias for the role, a
 
    If you use a `database router <https://docs.djangoproject.com/en/stable/topics/db/multi-db/#database-routers>`__, make sure it doesn’t send migrations to this alias.
 
-3. Define a :class:`~django_mcpz.sql.readers.SQLReader` alongside your MCP server, naming the alias, and listing the columns the role can read as a dict of models to field names:
+3. Define a :class:`~django_mcpz.sql.readers.SQLReader` alongside your MCP server, in your app’s ``mcp`` module, naming the alias, and listing the columns the role can read as a dict of models to field names:
 
    .. code-block:: python
 
@@ -88,8 +88,8 @@ The setup takes four steps: installing the app, a database alias for the role, a
    The ``default`` alias’s role makes these changes, unless you pick another with ``grantor``, so it needs permission to create roles, or create the role yourself beforehand, and must own the tables, or be able to grant on them.
    It also runs when the test runner creates the test database, so the role has its grants there too.
 
-   To find the readers, the app imports your URLconf after migrating, and with it every module that routes an MCP server.
-   So define readers in those modules, or ones they import, and keep them referenced, such as by passing them to :func:`~django_mcpz.sql.tools.add_sql_tools`, or as module-level variables.
+   To find the readers, the app imports each installed app’s ``mcp`` module after migrating, as the admin does for ``admin`` modules.
+   So define readers in your apps’ ``mcp`` modules, alongside the servers that use them, as covered in :doc:`servers`, or in modules they import.
    Each alias can have only one reader, since its role can only have one set of grants, so share it between servers, rather than defining it twice.
 
    With column-level grants, ``SELECT *`` on a table with unexposed columns fails with “permission denied”, but the schema lists only the exposed columns, so the LLM names them instead.

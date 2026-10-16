@@ -4,7 +4,6 @@ import datetime as dt
 import io
 import ipaddress
 import uuid
-import weakref
 from decimal import Decimal
 from typing import Any
 from unittest import mock
@@ -78,8 +77,8 @@ PART: dict[type[Model], list[str]] = {
 
 
 def isolated():
-    """A fresh registry of readers, apart from the one in tests.mcp."""
-    return mock.patch.object(readers_module, "_readers", weakref.WeakValueDictionary())
+    """An empty registry of readers, restored afterwards."""
+    return mock.patch.dict(readers_module._readers, clear=True)
 
 
 def make_reader(tables, using="reader", grantor="postgres"):
@@ -159,19 +158,12 @@ class SQLReaderTests(SimpleTestCase):
     def test_registered(self):
         assert sql_reader in all_readers()
 
-    def test_registry_weak(self):
-        with isolated():
-            SQLReader(tables=WIDGET_VIEW, using="reader", grantor="postgres")
-            # Nothing refers to it, so it's gone.
-            assert all_readers() == []
-
     def test_same_again(self):
         # A second, identical definition is fine, and replaces the first.
         with isolated():
-            first = SQLReader(tables=WIDGET_VIEW, using="reader", grantor="postgres")
+            SQLReader(tables=WIDGET_VIEW, using="reader", grantor="postgres")
             second = SQLReader(tables=WIDGET_VIEW, using="reader", grantor="postgres")
             assert all_readers() == [second]
-        del first
 
     def test_conflict_tables(self):
         with pytest.raises(ImproperlyConfigured) as excinfo:
@@ -991,6 +983,12 @@ class SyncGrantsTests(TestCase):
 
 
 class SyncReadersTests(SimpleTestCase):
+    def test_autodiscovers(self):
+        # Readers are found by importing apps' mcp modules.
+        with mock.patch("django_mcpz.sql.grants.autodiscover_modules") as discover:
+            sync_readers(using="default")
+        discover.assert_called_once_with("mcp")
+
     def test_only_readers_of_alias(self):
         with mock.patch("django_mcpz.sql.grants.sync_grants", return_value=[]) as sync:
             sync_readers(using="default")

@@ -382,7 +382,7 @@ As covered in :doc:`sql`.
 .. class:: SQLReader(*, tables, using="default", grantor="default")
 
     A read-only database role for the SQL tools, as covered in :doc:`sql`.
-    After every ``migrate``, the ``django_mcpz.sql`` app makes the role able to ``SELECT`` exactly the listed columns, and nothing else, finding readers by importing the URLconf.
+    After every ``migrate``, the ``django_mcpz.sql`` app makes the role able to ``SELECT`` exactly the listed columns, and nothing else, finding readers by importing each app’s ``mcp`` module.
 
     :param tables:
         The columns the role can read, as a dict of models, for tables or views, to lists of the names of the fields to expose, such as ``{Order: ["id", "pizza_id", "quantity"]}``.
