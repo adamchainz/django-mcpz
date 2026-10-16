@@ -7,6 +7,11 @@ Unreleased
 
 * Drop Python 3.10 support.
 
+* Make the ``tasks`` modules importable on Django 5.2, where they now define nothing.
+  Previously, tools that import every app’s ``tasks`` module, such as Celery’s autodiscovery, crashed because ``django.tasks`` does not exist before Django 6.0.
+
+  Thanks to nanorepublica for the report in `Issue #36 <https://github.com/adamchainz/django-mcpz/issues/36>`__.
+
 1.1.0 (2026-10-02)
 ------------------
 
