@@ -15,8 +15,9 @@ import msgspec
 import msgspec.json
 from django.apps import apps
 from django.core.exceptions import ImproperlyConfigured
-from django.db import connections, transaction
+from django.db import DatabaseError, connections, transaction
 from django.db.backends.base.base import BaseDatabaseWrapper
+from django.db.backends.utils import CursorWrapper
 from django.db.models import CompositePrimaryKey, Field, Model
 from django.http import HttpRequest
 from django_msgspec import enc_hook as django_enc_hook
@@ -31,9 +32,6 @@ try:
 except ImportError:  # pragma: no cover
     psycopg = None  # type: ignore[assignment]
 
-# The name of the server-side cursor each query runs through.
-CURSOR_NAME = "mcp_query"
-_DECLARE = f'DECLARE "{CURSOR_NAME}" CURSOR FOR '
 
 # SQLSTATE classes of errors in the query itself, which the model can fix.
 # Others, such as connection failures (08) and running out of resources
@@ -220,8 +218,8 @@ def run_query(
     Run a query in a read-only transaction, returning the column names, up to
     max_rows rows, and whether rows were left unfetched.
 
-    The query runs through a server-side cursor, so PostgreSQL wraps it as
-    DECLARE ... CURSOR FOR <sql>, sent with the extended query protocol. That
+    The query runs through Django's server-side cursor, so PostgreSQL wraps
+    it as DECLARE ... CURSOR FOR <sql>, sent with the extended query protocol. That
     accepts exactly one statement, which must be a query: no data-modifying
     statements, even in a WITH clause, and no transaction control.
 
@@ -234,44 +232,46 @@ def run_query(
     if not sql:
         raise ToolError("The SQL is empty.")
     deadline = time.monotonic() + timeout
+    declare_length = 0
     try:
         with transaction.atomic(using=using):
-            # Never commit: there is nothing to commit, and anything that
-            # slips past the read-only transaction is undone. Rolling back
-            # also reverts settings changed with set_config().
-            connection.set_rollback(True)
-            connection.ensure_connection()
-            pg_connection = connection.connection
-            with pg_connection.cursor() as cursor:
-                cursor.execute("SET TRANSACTION READ ONLY")
-                cursor.execute(_SETUP_SQL, [f"{max(1, int(timeout * 1000))}ms"])
-                privileged = cursor.fetchone()[1]
-            if privileged:
-                raise ImproperlyConfigured(
-                    f"The database alias {using!r} must log in as a role that"
-                    " is not a superuser, cannot bypass row-level security,"
-                    " and is not a member of other roles, or queries could"
-                    " read beyond the role's grants."
-                )
-            with psycopg.ServerCursor(pg_connection, CURSOR_NAME) as cursor:
-                # Django loads jsonb as text, for JSONField. Load it as JSON
-                # here, so it's nested JSON in results.
-                cursor.adapters.register_loader("jsonb", JsonbLoader)
-                # A newline ends any trailing -- comment, before the rest of
-                # the statement psycopg sends.
-                cursor.execute(f"{sql}\n")
-                assert cursor.description is not None
-                columns = [column.name for column in cursor.description]
-                rows, more = _fetch(cursor, max_rows, max_size, deadline)
-    except psycopg.Error as exc:
-        raise _query_error(exc, sql, timeout) from None
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SET TRANSACTION READ ONLY")
+                    cursor.execute(_SETUP_SQL, [f"{max(1, int(timeout * 1000))}ms"])
+                    privileged = cursor.fetchone()[1]
+                if privileged:
+                    raise ImproperlyConfigured(
+                        f"The database alias {using!r} must log in as a role"
+                        " that is not a superuser, cannot bypass row-level"
+                        " security, and is not a member of other roles, or"
+                        " queries could read beyond the role's grants."
+                    )
+                with connection.chunked_cursor() as cursor:
+                    declare_length = _declare_length(cursor.cursor)
+                    # Django loads jsonb as text, for JSONField. Load it as
+                    # JSON here, so it's nested JSON in results.
+                    cursor.cursor.adapters.register_loader("jsonb", JsonbLoader)
+                    # A newline ends any trailing -- comment, before the rest
+                    # of the statement psycopg sends.
+                    cursor.execute(f"{sql}\n")
+                    columns = [column[0] for column in cursor.description]
+                    rows, more = _fetch(cursor, max_rows, max_size, deadline)
+            except DatabaseError as exc:
+                raise _query_error(exc, sql, timeout, declare_length) from None
+            finally:
+                # Never commit: there is nothing to commit, and anything that
+                # slips past the read-only transaction is undone. Rolling back
+                # also reverts settings changed with set_config(). Requested
+                # last, as Django refuses queries after it.
+                connection.set_rollback(True)
     finally:
         _release_advisory_locks(connection)
     return columns, rows, more
 
 
 def _fetch(
-    cursor: psycopg.ServerCursor[Any], max_rows: int, max_size: int, deadline: float
+    cursor: CursorWrapper, max_rows: int, max_size: int, deadline: float
 ) -> tuple[list[tuple[Any, ...]], bool]:
     rows: list[tuple[Any, ...]] = []
     size = 0
@@ -309,29 +309,48 @@ def _release_advisory_locks(connection: BaseDatabaseWrapper) -> None:
         pg_connection is None
         or pg_connection.closed
         # In an outer transaction, which failed.
+        or connection.needs_rollback
         or pg_connection.info.transaction_status == psycopg.pq.TransactionStatus.INERROR
     ):
         return
-    with pg_connection.cursor() as cursor:
+    with connection.cursor() as cursor:
         cursor.execute("SELECT pg_advisory_unlock_all()")
 
 
-def _query_error(exc: psycopg.Error, sql: str, timeout: float) -> Exception:
-    sqlstate = exc.sqlstate
+def _declare_length(cursor: Any) -> int:
+    """
+    The length of the DECLARE that psycopg's server-side cursor puts before
+    the query, so error positions can be moved to match the query alone.
+    Django's cursors are NO SCROLL.
+    """
+    name = '"' + cursor.name.replace('"', '""') + '"'
+    hold = " WITH HOLD" if cursor.withhold else ""
+    return len(f"DECLARE {name} NO SCROLL CURSOR{hold} FOR ")
+
+
+def _query_error(
+    exc: DatabaseError, sql: str, timeout: float, declare_length: int
+) -> Exception:
+    """
+    The error to report for a query that failed: a ToolError for problems in
+    the query, which the LLM can fix, or the error itself otherwise.
+    """
+    cause = exc.__cause__
+    sqlstate = getattr(cause, "sqlstate", None)
     if sqlstate == _QUERY_CANCELED:
         return ToolError(
             f"The query was cancelled after running for {timeout:g} seconds."
             " Make it cheaper, for example by filtering earlier or"
             " aggregating less data."
         )
-    if sqlstate is None and isinstance(exc, psycopg.DataError):
+    if sqlstate is None and isinstance(cause, psycopg.DataError):
         # A value psycopg can't load, such as an infinite or BC date.
         return ToolError(
             f"Query error: {exc}. Cast the column to text to read such values."
         )
     if sqlstate is None or sqlstate[:2] not in _QUERY_ERROR_CLASSES:
         return exc
-    message = _strip_declare(str(exc))
+    message = _error_message(cause, sql, declare_length)
     if sqlstate == _SYNTAX_ERROR and (
         "multiple commands" in message or not _looks_like_query(sql)
     ):
@@ -339,18 +358,25 @@ def _query_error(exc: psycopg.Error, sql: str, timeout: float) -> Exception:
     return ToolError(f"Query error: {message}")
 
 
-def _strip_declare(message: str) -> str:
+def _error_message(error: Any, sql: str, declare_length: int) -> str:
     """
-    Remove the DECLARE that wraps the query from PostgreSQL's quote of it in
-    errors, moving the caret that marks the error position to match.
+    PostgreSQL's message, with the line of the query at the error position
+    marked by a caret, as psql shows. Built from the error's fields, since
+    PostgreSQL's own rendering quotes the whole DECLARE, truncated.
     """
-    lines = message.splitlines()
-    for i, line in enumerate(lines):
-        if _DECLARE in line:
-            lines[i] = line.replace(_DECLARE, "", 1)
-            if i + 1 < len(lines) and lines[i + 1].strip() == "^":
-                lines[i + 1] = lines[i + 1][len(_DECLARE) :]
-    return "\n".join(lines)
+    diag = error.diag
+    message = diag.message_primary or str(error)
+    position = int(diag.statement_position or 0) - 1 - declare_length
+    if 0 <= position <= len(sql):
+        start = sql.rfind("\n", 0, position) + 1
+        end = sql.find("\n", position)
+        line_number = sql.count("\n", 0, position) + 1
+        prefix = f"LINE {line_number}: "
+        line = sql[start : end if end != -1 else len(sql)]
+        message += f"\n{prefix}{line}\n{' ' * (len(prefix) + position - start)}^"
+    if diag.message_hint:
+        message += f"\nHINT:  {diag.message_hint}"
+    return message
 
 
 def _looks_like_query(sql: str) -> bool:

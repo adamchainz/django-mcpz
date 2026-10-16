@@ -28,7 +28,6 @@ from django_mcpz.sql.readers import SQLReader, all_readers
 from django_mcpz.sql.tools import (
     _fetch,
     _release_advisory_locks,
-    _strip_declare,
     add_sql_tools,
     describe_tables,
     encode_result,
@@ -501,13 +500,6 @@ class EncodeResultTests(SimpleTestCase):
         assert result["note"].startswith("Only the first 1 rows are shown.")
 
 
-class StripDeclareTests(SimpleTestCase):
-    def test_no_caret(self):
-        assert _strip_declare('x\nLINE 1: DECLARE "mcp_query" CURSOR FOR y\nz') == (
-            "x\nLINE 1: y\nz"
-        )
-
-
 class ReleaseAdvisoryLocksTests(SimpleTestCase):
     def test_not_connected(self):
         _release_advisory_locks(mock.Mock(connection=None))
@@ -674,6 +666,34 @@ class SQLServerTests(ServerTestCase, TestCase):
             "LINE 1: SELECT FROM WHERE\n"
             "                    ^"
         )
+
+    def test_error_second_line(self):
+        assert self.query("SELECT 1\nFROM nope") == (
+            'Query error: relation "nope" does not exist\n'
+            "LINE 2: FROM nope\n"
+            "             ^"
+        )
+
+    def test_error_hint(self):
+        assert self.query("SELECT nope()") == (
+            "Query error: function nope() does not exist\n"
+            "LINE 1: SELECT nope()\n"
+            "               ^\n"
+            "HINT:  No function matches the given name and argument types. You"
+            " might need to add explicit type casts."
+        )
+
+    def test_execute_wrapper(self):
+        # Queries run through Django's database layer, so its hooks see them.
+        seen = []
+
+        def wrapper(execute, sql, params, many, context):
+            seen.append(sql)
+            return execute(sql, params, many, context)
+
+        with connections["reader"].execute_wrapper(wrapper):
+            self.query("SELECT 1 AS one")
+        assert "SELECT 1 AS one\n" in seen
 
     def test_multiple_statements(self):
         assert self.query("SELECT 1; DELETE FROM tests_widget") == (
