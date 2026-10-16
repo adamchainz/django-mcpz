@@ -591,3 +591,15 @@ add_sql_tools(
     max_rows=2,
     timeout=1,
 )
+
+
+# On SQLite, the default alias, with no roles: the tools allow reading only
+# these columns as each query runs.
+sqlite_reader = SQLReader(
+    tables={
+        Widget: ["id", "name", "price"],
+        WidgetView: ["id", "name"],
+    },
+)
+sqlite_server = MCPServer(name="sqlite-server", version="1.0.0", auth=public)
+add_sql_tools(sqlite_server, reader=sqlite_reader, max_rows=2, timeout=1)

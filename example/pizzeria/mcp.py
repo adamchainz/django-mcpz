@@ -302,36 +302,37 @@ def menu_link(request: HttpRequest, params: MenuLinkParams) -> ResourceLink:
     )
 
 
-if "reader" in settings.DATABASES:
-    # Ad hoc reporting over the read-only views, for questions the other tools
-    # don't answer, like "which pizza sold best last month?" The reader alias
-    # logs in as a role that django_mcpz.sql allows to read only these
-    # columns, after every migrate. Fields not named here stay hidden, even if
-    # they are added to the models later.
-    reports_reader = SQLReader(
-        using="reader",
-        tables={
-            MenuItem: [
-                "id",
-                "name",
-                "price",
-                "vegetarian",
-                "available_from",
-                "available_until",
-            ],
-            OrderLine: [
-                "id",
-                "pizza_id",
-                "quantity",
-                "total",
-                "placed_at",
-                "has_requests",
-                "channel",
-            ],
-        },
-    )
-    add_sql_tools(
-        server,
-        reader=reports_reader,
-        context="MCPizza's sales data. Prices and totals are in pounds (GBP).",
-    )
+# Ad hoc reporting over the read-only views, for questions the other tools
+# don't answer, like "which pizza sold best last month?" Only these columns
+# can be read: fields not named here stay hidden, even if they are added to
+# the models later. On PostgreSQL, queries run through the reader alias, which
+# logs in as a role that django_mcpz.sql allows to read only these columns,
+# after every migrate. On SQLite, which has no roles, they run on the default
+# alias, checked as each query runs.
+reports_reader = SQLReader(
+    using="reader" if "reader" in settings.DATABASES else "default",
+    tables={
+        MenuItem: [
+            "id",
+            "name",
+            "price",
+            "vegetarian",
+            "available_from",
+            "available_until",
+        ],
+        OrderLine: [
+            "id",
+            "pizza_id",
+            "quantity",
+            "total",
+            "placed_at",
+            "has_requests",
+            "channel",
+        ],
+    },
+)
+add_sql_tools(
+    server,
+    reader=reports_reader,
+    context="MCPizza's sales data. Prices and totals are in pounds (GBP).",
+)

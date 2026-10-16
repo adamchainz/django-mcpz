@@ -9,12 +9,17 @@ Rather than writing a tool for every question someone might ask of your data, yo
 * ``sql_schema`` lists the tables the LLM may query, then describes the columns of the ones it picks, as ``CREATE TABLE`` statements with comments.
 * ``sql_query`` runs one read-only ``SELECT`` statement and returns the rows.
 
-This works with PostgreSQL only, through `psycopg 3 <https://www.psycopg.org/psycopg3/>`__.
+This works with PostgreSQL, through `psycopg 3 <https://www.psycopg.org/psycopg3/>`__, and SQLite.
 
-Never give the LLM your application’s database role.
 The LLM writes the SQL, and the SQL may come from whoever it is talking to, and whatever text it has read, so treat it as untrusted.
-The tools are designed for a dedicated PostgreSQL role that can read chosen columns of chosen tables and views, and nothing eSetup
+On PostgreSQL, never give the LLM your application’s database role: the tools are designed for a dedicated role that can read chosen columns of chosen tables and views, and nothing else.
+SQLite has no roles, so instead the tools check every read as each query runs, as covered in :ref:`sql-sqlite`.
+
+Setup
 -----
+
+These steps are for PostgreSQL.
+For SQLite, skip the database alias, and leave ``using`` as ``"default"``, as covered in :ref:`sql-sqlite`.
 
 The setup takes four steps: installing the app, a database alias for the role, a reader listing what the role can read, and the tools.
 
@@ -236,12 +241,12 @@ When rows are left out, the result adds ``"truncated": true`` and a ``"note"`` t
 Rows are left out past ``max_rows``, or when the result would exceed ``max_size``.
 Long values are shortened too, to a fair share of ``max_size``, so a single huge value can’t flood the LLM’s context.
 
-Errors in the query, such as syntax errors, unknown columns, and permission denied, are returned to the LLM as tool errors, with PostgreSQL’s message, so it can correct itself.
+Errors in the query, such as syntax errors, unknown columns, and permission denied, are returned to the LLM as tool errors, with the database’s message, so it can correct itself.
 
 Security
 --------
 
-The PostgreSQL role is the security boundary: the LLM can read whatever the role can.
+On PostgreSQL, the role is the security boundary: the LLM can read whatever the role can.
 The tools add more limits on top:
 
 * Each query runs in a ``READ ONLY`` transaction, which is always rolled back.
@@ -276,3 +281,38 @@ Some things the role can still do, given PostgreSQL’s defaults:
 Use your server’s ``auth`` and the ``permission`` argument to limit who can call the tools, and consider pointing the alias at a read replica.
 
 The tools are marked as read-only, with ``readOnlyHint``, so clients may run them without asking the user each time.
+
+.. _sql-sqlite:
+
+SQLite
+------
+
+SQLite has no roles or grants, so there’s no separate database alias or ``migrate`` step.
+Define the reader on your usual alias, leaving ``using`` as ``"default"``:
+
+.. code-block:: python
+
+    reports_reader = SQLReader(
+        tables={
+            Pizza: ["id", "name", "price", "vegetarian"],
+            Order: ["id", "pizza_id", "quantity", "total", "placed_at"],
+        },
+    )
+
+Instead, each query runs with an `authorizer callback <https://docs.python.org/3/library/sqlite3.html#sqlite3.Connection.set_authorizer>`__, which SQLite asks about every read and action as it compiles the query:
+
+* Reading the listed columns is allowed, as are reads inside views, whose own columns are checked when the query reads them.
+  Reading anything else, including SQLite’s own tables like ``sqlite_master``, fails with “access to … is prohibited”.
+
+* Reads that touch no column, such as ``count(*)``, are allowed for any table, so the LLM can count rows in tables it can’t read.
+  SQLite turns some queries on views into such reads of the tables behind them, so this is needed for views to work.
+
+* Every other action is denied: writes, ``ATTACH``, ``PRAGMA``, transaction control, and functions that reach outside the database, like ``load_extension()``.
+
+* Python’s ``sqlite3`` module runs only one statement per query.
+
+A progress handler cancels queries that run longer than the timeout, and the query runs in a savepoint that is rolled back, like on PostgreSQL.
+The authorizer and progress handler are set only while the query runs, so the rest of your app uses the connection as usual.
+
+The checks are only as good as SQLite’s authorizer, and they run on your app’s own connection, so a gap in them, or a function your app registers on the connection, could reach any data the app can.
+For untrusted callers, PostgreSQL with a dedicated role is the stronger boundary.

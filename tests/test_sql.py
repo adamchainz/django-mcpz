@@ -23,11 +23,11 @@ from django.test import (
 
 from django_mcpz.server import MCPServer, ToolError, public
 from django_mcpz.sql import readers as readers_module
+from django_mcpz.sql.backends import PostgreSQLBackend, get_backend
 from django_mcpz.sql.grants import sync_grants, sync_readers
 from django_mcpz.sql.readers import SQLReader, all_readers
 from django_mcpz.sql.tools import (
     _fetch,
-    _release_advisory_locks,
     add_sql_tools,
     describe_tables,
     encode_result,
@@ -107,10 +107,13 @@ class AddSQLToolsTests(SimpleTestCase):
             " maintain the reader role's grants."
         )
 
-    def test_not_postgresql(self):
-        reader = make_reader(WIDGET_VIEW, using="default", grantor="postgres")
-        assert self.error(reader=reader) == (
-            "add_sql_tools() needs a PostgreSQL database, but 'default' is sqlite."
+    def test_unsupported_database(self):
+        connection = mock.Mock(vendor="mysql", display_name="MySQL", alias="mysql")
+        with pytest.raises(ImproperlyConfigured) as excinfo:
+            get_backend(connection)
+        assert str(excinfo.value) == (
+            "The SQL tools support PostgreSQL and SQLite, not MySQL, for the"
+            " database alias 'mysql'."
         )
 
     def test_max_rows(self):
@@ -188,14 +191,20 @@ class SQLReaderTests(SimpleTestCase):
         )
 
     def test_using_is_grantor(self):
-        # The defaults, so using must be given.
+        # On PostgreSQL, the reader logs in as its own role.
         with pytest.raises(ImproperlyConfigured) as excinfo:
-            SQLReader(tables=WIDGET_VIEW)
+            make_reader(WIDGET_VIEW, using="postgres", grantor="postgres")
         assert str(excinfo.value) == (
             "SQLReader needs using, the alias that logs in as the reader role,"
             " to differ from grantor, the alias whose role grants it access,"
-            " but both are 'default'."
+            " but both are 'postgres'."
         )
+
+    def test_sqlite_defaults(self):
+        # SQLite has no roles, so the defaults, both "default", are fine.
+        with isolated():
+            reader = SQLReader(tables={Widget: ["id"]})
+        assert (reader.using, reader.grantor) == ("default", "default")
 
     def test_no_tables(self):
         assert self.error({}) == (
@@ -502,16 +511,23 @@ class EncodeResultTests(SimpleTestCase):
 
 class ReleaseAdvisoryLocksTests(SimpleTestCase):
     def test_not_connected(self):
-        _release_advisory_locks(mock.Mock(connection=None))
+        PostgreSQLBackend().finish(mock.Mock(connection=None))
 
     def test_closed(self):
-        _release_advisory_locks(mock.Mock(connection=mock.Mock(closed=True)))
+        PostgreSQLBackend().finish(mock.Mock(connection=mock.Mock(closed=True)))
+
+    def test_needs_rollback(self):
+        pg_connection = mock.Mock(closed=False)
+        connection = mock.Mock(connection=pg_connection, needs_rollback=True)
+        PostgreSQLBackend().finish(connection)
+        connection.cursor.assert_not_called()
 
     def test_failed_transaction(self):
         pg_connection = mock.Mock(closed=False)
         pg_connection.info.transaction_status = psycopg.pq.TransactionStatus.INERROR
-        _release_advisory_locks(mock.Mock(connection=pg_connection))
-        pg_connection.cursor.assert_not_called()
+        connection = mock.Mock(connection=pg_connection, needs_rollback=False)
+        PostgreSQLBackend().finish(connection)
+        connection.cursor.assert_not_called()
 
 
 class FetchTests(SimpleTestCase):
@@ -771,7 +787,11 @@ class SQLServerTests(ServerTestCase, TestCase):
         # The postgres alias logs in as a superuser.
         with pytest.raises(ImproperlyConfigured) as excinfo:
             run_query(
-                "SELECT 1", using="postgres", max_rows=1, max_size=1000, timeout=1
+                "SELECT 1",
+                reader=make_reader(WIDGET_VIEW, using="postgres", grantor="reader"),
+                max_rows=1,
+                max_size=1000,
+                timeout=1,
             )
         assert str(excinfo.value).startswith(
             "The database alias 'postgres' must log in as a role that is not a"
@@ -809,7 +829,7 @@ class RunQueryTransactionTests(TransactionTestCase):
         with pytest.raises(ToolError) as excinfo:
             run_query(
                 "SELECT set_config('transaction_read_only', 'off', true)",
-                using="reader",
+                reader=sql_reader,
                 max_rows=10,
                 max_size=1000,
                 timeout=1,
@@ -824,7 +844,7 @@ class RunQueryTransactionTests(TransactionTestCase):
         try:
             assert run_query(
                 "SELECT name FROM tests_widget ORDER BY name",
-                using="reader",
+                reader=self.widget_reader,
                 max_rows=10,
                 max_size=1000,
                 timeout=1,
@@ -832,7 +852,7 @@ class RunQueryTransactionTests(TransactionTestCase):
             with pytest.raises(ToolError) as excinfo:
                 run_query(
                     "SELECT price FROM tests_widget",
-                    using="reader",
+                    reader=self.widget_reader,
                     max_rows=10,
                     max_size=1000,
                     timeout=1,
@@ -845,7 +865,7 @@ class RunQueryTransactionTests(TransactionTestCase):
 
     def test_autocommit_restored(self):
         assert run_query(
-            "SELECT 1", using="reader", max_rows=10, max_size=1000, timeout=1
+            "SELECT 1", reader=sql_reader, max_rows=10, max_size=1000, timeout=1
         ) == (
             ["?column?"],
             [(1,)],
@@ -1037,3 +1057,168 @@ class SyncReadersTests(SimpleTestCase):
         ):
             sync_readers(using="postgres")
         assert "tests_x" in stdout.getvalue()
+
+
+class SQLiteServerTests(ServerTestCase, TestCase):
+    url = "/sqlite-mcp"
+
+    @classmethod
+    def setUpTestData(cls):
+        Widget.objects.create(name="Sprocket", price="4.50")
+        Widget.objects.create(name="Gizmo", price="12.00", in_stock=False)
+        Widget.objects.create(name="Doohickey", price="0.99")
+
+    def call(self, name, arguments=None):
+        response = self.post(
+            make_message("tools/call", {"name": name, "arguments": arguments or {}})
+        )
+        assert response.status_code == 200
+        return response.json()["result"]
+
+    def query(self, sql):
+        result = self.call("sql_query", {"sql": sql})
+        if result["isError"]:
+            return result["content"][0]["text"]
+        return result["structuredContent"]
+
+    def test_description(self):
+        response = self.post(make_message("tools/list"))
+        tools = {tool["name"]: tool for tool in response.json()["result"]["tools"]}
+        assert tools["sql_query"]["description"].startswith(
+            "Run one read-only SQLite SELECT query"
+        )
+
+    def test_tables(self):
+        text = self.call("sql_schema")["content"][0]["text"]
+        assert text.startswith(
+            "Dates and times are stored as ISO 8601 text, in UTC, so use SQLite's"
+            " date and time functions on them.\n"
+        )
+
+    def test_query(self):
+        assert self.query("SELECT name, price FROM tests_widget ORDER BY price") == {
+            "columns": ["name", "price"],
+            "rows": [["Doohickey", 0.99], ["Sprocket", 4.5]],
+            "truncated": True,
+            "note": (
+                "Only the first 2 rows are shown. Aggregate, filter, or add a"
+                " LIMIT to see the rest."
+            ),
+        }
+
+    def test_count(self):
+        assert self.query("SELECT count(*) AS n FROM tests_widget_view") == {
+            "columns": ["n"],
+            "rows": [[3]],
+        }
+
+    def test_view(self):
+        # The view reads price and in_stock behind the scenes, which is fine.
+        assert self.query(
+            "SELECT name FROM tests_widget_view WHERE id = (SELECT min(id) FROM"
+            " tests_widget)"
+        ) == {"columns": ["name"], "rows": [["Sprocket"]]}
+
+    def test_view_unlisted_column(self):
+        assert self.query("SELECT price FROM tests_widget_view") == (
+            "Query error: access to tests_widget_view.price is prohibited"
+        )
+
+    def test_unlisted_column(self):
+        assert self.query("SELECT in_stock FROM tests_widget") == (
+            "Query error: access to tests_widget.in_stock is prohibited"
+        )
+
+    def test_unlisted_table(self):
+        assert self.query("SELECT username FROM auth_user") == (
+            "Query error: access to auth_user.username is prohibited"
+        )
+
+    def test_star(self):
+        # SELECT * reads every column, including unlisted ones.
+        assert self.query("SELECT * FROM tests_widget") == (
+            "Query error: access to tests_widget.in_stock is prohibited"
+        )
+
+    def test_schema_table(self):
+        assert self.query("SELECT sql FROM sqlite_master") == (
+            "Query error: access to sqlite_master.sql is prohibited"
+        )
+
+    def test_with_and_functions(self):
+        assert self.query(
+            "WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r"
+            " WHERE n < 3) SELECT group_concat(n) AS ns, (SELECT count(*) FROM"
+            " json_each('[1, 2]')) AS js FROM r"
+        ) == {"columns": ["ns", "js"], "rows": [["1,2,3", 2]]}
+
+    def test_percent(self):
+        assert self.query("SELECT '%s' LIKE '%%s' AS p") == {
+            "columns": ["p"],
+            "rows": [[1]],
+        }
+
+    def test_delete(self):
+        assert self.query("DELETE FROM tests_widget") == (
+            "Query error: not authorized\n"
+            "Only a single SELECT statement is allowed, or WITH, VALUES, or TABLE."
+        )
+        assert Widget.objects.count() == 3
+
+    def test_multiple_statements(self):
+        assert self.query("SELECT 1; DELETE FROM tests_widget") == (
+            "Query error: You can only execute one statement at a time.\n"
+            "Only a single SELECT statement is allowed, or WITH, VALUES, or TABLE."
+        )
+        assert Widget.objects.count() == 3
+
+    def test_pragma(self):
+        assert self.query("PRAGMA query_only = off").startswith(
+            "Query error: not authorized"
+        )
+
+    def test_attach(self):
+        assert self.query("ATTACH DATABASE ':memory:' AS other").startswith(
+            "Query error: not authorized"
+        )
+
+    def test_denied_function(self):
+        assert self.query("SELECT load_extension('x')") == (
+            "Query error: not authorized to use function: load_extension"
+        )
+
+    def test_syntax_error(self):
+        assert self.query("SELECT FROM") == ('Query error: near "FROM": syntax error')
+
+    def test_timeout(self):
+        assert self.query(
+            "WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r)"
+            " SELECT count(*) FROM r"
+        ) == (
+            "The query was cancelled after running for 1 seconds. Make it"
+            " cheaper, for example by filtering earlier or aggregating less"
+            " data."
+        )
+
+    def test_authorizer_removed(self):
+        # After a query, the connection is unrestricted again, for the app.
+        self.query("SELECT name FROM tests_widget")
+        Widget.objects.create(name="Thingamajig", price="1.00")
+        assert Widget.objects.count() == 4
+
+
+class SQLiteErrorTests(SimpleTestCase):
+    def test_server_error(self):
+        # Errors that are not the query's fault, such as a locked database,
+        # are raised as they are.
+        import sqlite3
+
+        from django.db import OperationalError
+
+        from django_mcpz.sql.backends import _sqlite_error
+
+        cause = sqlite3.OperationalError("database is locked")
+        cause.sqlite_errorname = "SQLITE_BUSY"
+        exc = OperationalError("database is locked")
+        exc.__cause__ = cause
+        assert _sqlite_error(exc, "SELECT 1", 1) is exc

@@ -1,6 +1,6 @@
 """
-Tools that let an LLM run read-only SQL queries against PostgreSQL, as the role
-of an SQLReader, limited to chosen columns of chosen tables and views.
+Tools that let an LLM run read-only SQL queries, limited to the chosen columns
+of tables and views of an SQLReader.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import msgspec
 import msgspec.json
 from django.apps import apps
 from django.core.exceptions import ImproperlyConfigured
-from django.db import DatabaseError, connections, transaction
+from django.db import connections, transaction
 from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.backends.utils import CursorWrapper
 from django.db.models import CompositePrimaryKey, Field, Model
@@ -23,55 +23,13 @@ from django.http import HttpRequest
 from django_msgspec import enc_hook as django_enc_hook
 
 from django_mcpz.server import MCPServer, ToolError
+from django_mcpz.sql.backends import get_backend
 from django_mcpz.sql.readers import SQLReader, Table, db_type, quote_name
-
-try:
-    import psycopg
-    import psycopg.pq
-    from psycopg.types.json import JsonbLoader
-except ImportError:  # pragma: no cover
-    psycopg = None  # type: ignore[assignment]
-
-
-# SQLSTATE classes of errors in the query itself, which the model can fix.
-# Others, such as connection failures (08) and running out of resources
-# (53), are the server's problem, and raised as such.
-_QUERY_ERROR_CLASSES = frozenset(
-    {
-        "0A",  # feature not supported
-        "21",  # cardinality violation
-        "22",  # data exception
-        "25",  # invalid transaction state, such as writing when read-only
-        "2F",  # SQL routine exception
-        "38",  # external routine exception
-        "39",  # external routine invocation exception
-        "42",  # syntax error or access rule violation
-        "54",  # program limit exceeded
-        "P0",  # PL/pgSQL error
-    }
-)
-_QUERY_CANCELED = "57014"
-_SYNTAX_ERROR = "42601"
 
 # Rows are fetched in batches, checking the limits between them, so a query
 # with huge values can't fill the server's memory. The first batch is one
 # row, and later ones are sized from the rows so far, up to this.
 MAX_FETCH_BATCH = 100
-
-# Checked on every query, alongside setting the timeout: the login role must
-# be a plain one, unable to read more than it was granted.
-_SETUP_SQL = """
-SELECT
-    set_config('statement_timeout', %s, true),
-    current_user <> session_user
-    OR rolsuper
-    OR rolbypassrls
-    OR EXISTS (SELECT FROM pg_auth_members WHERE member = pg_roles.oid)
-FROM pg_roles
-WHERE rolname = session_user
-"""
-
-_ONLY_SELECT = "Only a single SELECT statement is allowed, or WITH, VALUES, or TABLE."
 
 
 class SQLSchemaParams(msgspec.Struct):
@@ -91,8 +49,8 @@ class SQLQueryParams(msgspec.Struct):
         str,
         msgspec.Meta(
             description=(
-                "A single PostgreSQL SELECT statement. WITH, VALUES, and"
-                " TABLE work too. No other statement types."
+                "A single SELECT statement. WITH, VALUES, and TABLE work"
+                " too. No other statement types."
             )
         ),
     ]
@@ -114,11 +72,12 @@ def add_sql_tools(
     describing the columns of some, as SQL, and one running a read-only query
     against them.
 
-    Queries run through the reader's database alias, which logs in as a
-    PostgreSQL role that may only SELECT the reader's columns, as maintained
-    by the django_mcpz.sql app after every migrate. That role is the security
-    boundary. This adds read-only transactions, a single
-    statement per call, a statement timeout, and limits on the result.
+    Queries run through the reader's database alias. On PostgreSQL, that
+    logs in as a role that may only SELECT the reader's columns, as
+    maintained by the django_mcpz.sql app after every migrate, and the role
+    is the security boundary. On SQLite, an authorizer callback allows only
+    reads of those columns. Both add a single statement per call, a timeout,
+    and limits on the result.
     """
     if not apps.is_installed("django_mcpz.sql"):
         raise ImproperlyConfigured(
@@ -127,19 +86,8 @@ def add_sql_tools(
         )
     using = reader.using
     connection = connections[using]
-    if connection.vendor != "postgresql":
-        raise ImproperlyConfigured(
-            f"add_sql_tools() needs a PostgreSQL database, but {using!r} is"
-            f" {connection.vendor}."
-        )
-    if connection.settings_dict["OPTIONS"].get("assume_role"):
-        raise ImproperlyConfigured(
-            f"add_sql_tools() needs {using!r} to log in as the reader role,"
-            " not use assume_role, since queries could switch back to the"
-            " login role with set_config('role', ...)."
-        )
-    if psycopg is None:  # pragma: no cover
-        raise ImproperlyConfigured("add_sql_tools() needs psycopg 3.")
+    backend = get_backend(connection)
+    backend.check(connection)
     if max_rows < 1:
         raise ImproperlyConfigured("max_rows must be at least 1.")
     if max_size < 1000:
@@ -187,7 +135,7 @@ def add_sql_tools(
     @server.tool(
         name=query_name,
         description=(
-            "Run one read-only PostgreSQL SELECT query and get the result rows,"
+            f"Run one read-only {backend.name} SELECT query and get the result rows,"
             ' as JSON: "columns" names the columns, and "rows" holds one array'
             f" of values per row. Call {schema_name} to find the tables and"
             f" their columns first. At most {max_rows} rows are returned, and"
@@ -203,7 +151,7 @@ def add_sql_tools(
     def sql_query(request: HttpRequest, params: SQLQueryParams) -> msgspec.Raw:
         columns, rows, more = run_query(
             params.sql,
-            using=using,
+            reader=reader,
             max_rows=max_rows,
             max_size=max_size,
             timeout=timeout,
@@ -212,61 +160,39 @@ def add_sql_tools(
 
 
 def run_query(
-    sql: str, *, using: str, max_rows: int, max_size: int, timeout: float
+    sql: str, *, reader: SQLReader, max_rows: int, max_size: int, timeout: float
 ) -> tuple[list[str], list[tuple[Any, ...]], bool]:
     """
-    Run a query in a read-only transaction, returning the column names, up to
-    max_rows rows, and whether rows were left unfetched.
-
-    The query runs through Django's server-side cursor, so PostgreSQL wraps
-    it as DECLARE ... CURSOR FOR <sql>, sent with the extended query protocol. That
-    accepts exactly one statement, which must be a query: no data-modifying
-    statements, even in a WITH clause, and no transaction control.
+    Run a query as the reader, returning the column names, up to max_rows
+    rows, and whether rows were left unfetched. It runs in a transaction, or
+    savepoint, that is always rolled back, with the database's backend
+    making it read-only.
 
     Rows are fetched in batches, stopping at max_rows, once roughly max_size
-    bytes of values have arrived, or once the timeout has passed, since each
-    FETCH gets its own statement timeout.
+    bytes of values have arrived, or once the timeout has passed, since on
+    PostgreSQL, each FETCH gets its own statement timeout.
     """
+    using = reader.using
     connection = connections[using]
+    backend = get_backend(connection)
     sql = sql.strip().rstrip(";").rstrip()
     if not sql:
         raise ToolError("The SQL is empty.")
     deadline = time.monotonic() + timeout
-    declare_length = 0
     try:
         with transaction.atomic(using=using):
             try:
-                with connection.cursor() as cursor:
-                    cursor.execute("SET TRANSACTION READ ONLY")
-                    cursor.execute(_SETUP_SQL, [f"{max(1, int(timeout * 1000))}ms"])
-                    privileged = cursor.fetchone()[1]
-                if privileged:
-                    raise ImproperlyConfigured(
-                        f"The database alias {using!r} must log in as a role"
-                        " that is not a superuser, cannot bypass row-level"
-                        " security, and is not a member of other roles, or"
-                        " queries could read beyond the role's grants."
-                    )
-                with connection.chunked_cursor() as cursor:
-                    declare_length = _declare_length(cursor.cursor)
-                    # Django loads jsonb as text, for JSONField. Load it as
-                    # JSON here, so it's nested JSON in results.
-                    cursor.cursor.adapters.register_loader("jsonb", JsonbLoader)
-                    # A newline ends any trailing -- comment, before the rest
-                    # of the statement psycopg sends.
-                    cursor.execute(f"{sql}\n")
+                with backend.execute(connection, reader, sql, timeout) as cursor:
                     columns = [column[0] for column in cursor.description]
                     rows, more = _fetch(cursor, max_rows, max_size, deadline)
-            except DatabaseError as exc:
-                raise _query_error(exc, sql, timeout, declare_length) from None
             finally:
                 # Never commit: there is nothing to commit, and anything that
-                # slips past the read-only transaction is undone. Rolling back
-                # also reverts settings changed with set_config(). Requested
+                # slips past the read-only transaction is undone, including
+                # settings changed with set_config() on PostgreSQL. Requested
                 # last, as Django refuses queries after it.
                 connection.set_rollback(True)
     finally:
-        _release_advisory_locks(connection)
+        backend.finish(connection)
     return columns, rows, more
 
 
@@ -296,92 +222,6 @@ def _rough_size(value: Any) -> int:
     if isinstance(value, (str, bytes)):
         return len(value)
     return 8
-
-
-def _release_advisory_locks(connection: BaseDatabaseWrapper) -> None:
-    """
-    Release session-level advisory locks the query took, with functions like
-    pg_advisory_lock(). Unlike settings, they outlast the rollback, and would
-    be held by the connection for later requests.
-    """
-    pg_connection = connection.connection
-    if (
-        pg_connection is None
-        or pg_connection.closed
-        # In an outer transaction, which failed.
-        or connection.needs_rollback
-        or pg_connection.info.transaction_status == psycopg.pq.TransactionStatus.INERROR
-    ):
-        return
-    with connection.cursor() as cursor:
-        cursor.execute("SELECT pg_advisory_unlock_all()")
-
-
-def _declare_length(cursor: Any) -> int:
-    """
-    The length of the DECLARE that psycopg's server-side cursor puts before
-    the query, so error positions can be moved to match the query alone.
-    Django's cursors are NO SCROLL.
-    """
-    name = '"' + cursor.name.replace('"', '""') + '"'
-    hold = " WITH HOLD" if cursor.withhold else ""
-    return len(f"DECLARE {name} NO SCROLL CURSOR{hold} FOR ")
-
-
-def _query_error(
-    exc: DatabaseError, sql: str, timeout: float, declare_length: int
-) -> Exception:
-    """
-    The error to report for a query that failed: a ToolError for problems in
-    the query, which the LLM can fix, or the error itself otherwise.
-    """
-    cause = exc.__cause__
-    sqlstate = getattr(cause, "sqlstate", None)
-    if sqlstate == _QUERY_CANCELED:
-        return ToolError(
-            f"The query was cancelled after running for {timeout:g} seconds."
-            " Make it cheaper, for example by filtering earlier or"
-            " aggregating less data."
-        )
-    if sqlstate is None and isinstance(cause, psycopg.DataError):
-        # A value psycopg can't load, such as an infinite or BC date.
-        return ToolError(
-            f"Query error: {exc}. Cast the column to text to read such values."
-        )
-    if sqlstate is None or sqlstate[:2] not in _QUERY_ERROR_CLASSES:
-        return exc
-    message = _error_message(cause, sql, declare_length)
-    if sqlstate == _SYNTAX_ERROR and (
-        "multiple commands" in message or not _looks_like_query(sql)
-    ):
-        message += f"\n{_ONLY_SELECT}"
-    return ToolError(f"Query error: {message}")
-
-
-def _error_message(error: Any, sql: str, declare_length: int) -> str:
-    """
-    PostgreSQL's message, with the line of the query at the error position
-    marked by a caret, as psql shows. Built from the error's fields, since
-    PostgreSQL's own rendering quotes the whole DECLARE, truncated.
-    """
-    diag = error.diag
-    message = diag.message_primary or str(error)
-    position = int(diag.statement_position or 0) - 1 - declare_length
-    if 0 <= position <= len(sql):
-        start = sql.rfind("\n", 0, position) + 1
-        end = sql.find("\n", position)
-        line_number = sql.count("\n", 0, position) + 1
-        prefix = f"LINE {line_number}: "
-        line = sql[start : end if end != -1 else len(sql)]
-        message += f"\n{prefix}{line}\n{' ' * (len(prefix) + position - start)}^"
-    if diag.message_hint:
-        message += f"\nHINT:  {diag.message_hint}"
-    return message
-
-
-def _looks_like_query(sql: str) -> bool:
-    words = sql.lstrip("(").split(None, 1)
-    return bool(words) and words[0].lower() in {"select", "with", "values", "table"}
 
 
 # Results
@@ -492,10 +332,7 @@ def list_tables(
     parts = []
     if context:
         parts.append(context.strip())
-    parts.append(
-        f"Queries run with the time zone {connection.timezone_name}, which"
-        " applies to date functions on timestamp with time zone columns."
-    )
+    parts.append(get_backend(connection).time_note(connection))
     lines = ["Tables:"]
     for table in table_list:
         line = f"- {quote_name(table.name)}"

@@ -13,6 +13,7 @@ from django.db import connections, transaction
 from django.utils.module_loading import autodiscover_modules
 from psycopg import sql as pg_sql
 
+from django_mcpz.sql.backends import get_backend
 from django_mcpz.sql.readers import SQLReader, all_readers, quote_name
 
 
@@ -27,7 +28,11 @@ def sync_readers(
     # modules, so import those first, as the admin does for admin modules.
     autodiscover_modules("mcp")
     for reader in all_readers():
-        if reader.grantor == using:
+        # SQLite readers have no role, being checked as each query runs.
+        if (
+            reader.grantor == using
+            and get_backend(connections[reader.using]).uses_roles
+        ):
             missing = sync_grants(reader)
             if missing and verbosity >= 1:
                 (stdout or sys.stdout).write(

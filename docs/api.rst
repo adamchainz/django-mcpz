@@ -350,7 +350,7 @@ As covered in :doc:`sql`.
 
     :param reader:
         The :class:`~django_mcpz.sql.readers.SQLReader` to run queries as, through its database alias, listing the columns it can read.
-        The alias must be PostgreSQL, connecting with psycopg 3, as the reader role that the ``django_mcpz.sql`` app maintains.
+        On PostgreSQL, connecting with psycopg 3, the alias logs in as the reader role that the ``django_mcpz.sql`` app maintains.
 
     :param context:
         Optional text shown at the top of the table list, for anything that applies across tables.
@@ -375,14 +375,15 @@ As covered in :doc:`sql`.
     :param permission:
         An optional permission for both tools, as for :meth:`~django_mcpz.server.MCPServer.tool`.
 
-    Raises ``ImproperlyConfigured`` if the ``django_mcpz.sql`` app isn’t installed, the reader’s database isn’t PostgreSQL, or a limit is out of range.
+    Raises ``ImproperlyConfigured`` if the ``django_mcpz.sql`` app isn’t installed, or a limit is out of range.
 
 .. currentmodule:: django_mcpz.sql.readers
 
 .. class:: SQLReader(*, tables, using="default", grantor="default")
 
-    A read-only database role for the SQL tools, as covered in :doc:`sql`.
-    After every ``migrate``, the ``django_mcpz.sql`` app makes the role able to ``SELECT`` exactly the listed columns, and nothing else, finding readers by importing each app’s ``mcp`` module.
+    What the SQL tools can read, as covered in :doc:`sql`.
+    On PostgreSQL, the reader’s alias logs in as its own role, and after every ``migrate``, the ``django_mcpz.sql`` app makes the role able to ``SELECT`` exactly the listed columns, and nothing else, finding readers by importing each app’s ``mcp`` module.
+    On SQLite, the tools allow reading only the listed columns as each query runs.
 
     :param tables:
         The columns the role can read, as a dict of models, for tables or views, to lists of the names of the fields to expose, such as ``{Order: ["id", "pizza_id", "quantity"]}``.
@@ -390,12 +391,13 @@ As covered in :doc:`sql`.
         The models’ and fields’ documentation drives the schema tool.
 
     :param using:
-        The database alias that logs in as the role, which the tools query through.
+        The database alias the tools query through, which, on PostgreSQL, logs in as the reader’s role.
 
     :param grantor:
-        The database alias whose role creates and grants to the reader’s role, after that alias is migrated.
+        On PostgreSQL, the database alias whose role creates and grants to the reader’s role, after that alias is migrated.
+        Unused on SQLite.
 
-    Raises ``ImproperlyConfigured`` if an alias isn’t in ``DATABASES``, ``using`` and ``grantor`` are the same, ``tables`` names a field that isn’t a column, or another reader for the same alias lists different columns.
+    Raises ``ImproperlyConfigured`` if an alias isn’t in ``DATABASES``, the database isn’t PostgreSQL or SQLite, ``using`` and ``grantor`` are the same on PostgreSQL, ``tables`` names a field that isn’t a column, or another reader for the same alias lists different columns.
 
     Readers are immutable.
 

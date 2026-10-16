@@ -16,6 +16,8 @@ from django.db import connections
 from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.models import Field, Model
 
+from django_mcpz.sql.backends import get_backend
+
 # Every reader defined, by database alias, for the post_migrate handler to
 # sync, after importing each app's mcp module.
 _readers: dict[str, SQLReader] = {}
@@ -44,13 +46,14 @@ class Table:
 
 class SQLReader:
     """
-    A read-only database role for the SQL tools: the database alias that logs
-    in as it, the alias whose role maintains its grants, and the columns of
-    the models' tables it can read.
+    What the SQL tools can read: the columns of the models' tables, through
+    the database alias using.
 
-    After every migrate, the django_mcpz.sql app makes the role able to read
-    exactly these columns. Every field must be named, so adding a field to a
-    model never exposes its column.
+    On PostgreSQL, using logs in as its own role, and after every migrate,
+    the django_mcpz.sql app makes the role able to read exactly these
+    columns, from the grantor alias. On SQLite, the tools allow reading only
+    these columns as each query runs. Every field must be named, so adding a
+    field to a model never exposes its column.
     """
 
     __slots__ = ("using", "grantor", "tables")
@@ -71,7 +74,8 @@ class SQLReader:
                 raise ImproperlyConfigured(
                     f"SQLReader {name}={alias!r} isn't a database alias in DATABASES."
                 )
-        if using == grantor:
+        backend = get_backend(connections[using])
+        if backend.uses_roles and using == grantor:
             raise ImproperlyConfigured(
                 f"SQLReader needs using, the alias that logs in as the reader"
                 f" role, to differ from grantor, the alias whose role grants it"
