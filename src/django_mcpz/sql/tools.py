@@ -15,7 +15,7 @@ import msgspec
 import msgspec.json
 from django.apps import apps
 from django.core.exceptions import ImproperlyConfigured
-from django.db import connections, transaction
+from django.db import connections
 from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.backends.utils import CursorWrapper
 from django.db.models import CompositePrimaryKey, Field, Model
@@ -23,7 +23,7 @@ from django.http import HttpRequest
 from django_msgspec import enc_hook as django_enc_hook
 
 from django_mcpz.server import MCPServer, ToolError
-from django_mcpz.sql.backends import get_backend
+from django_mcpz.sql.queries import get_query
 from django_mcpz.sql.readers import SQLReader, Table, db_type, quote_name
 
 # Rows are fetched in batches, checking the limits between them, so a query
@@ -86,8 +86,18 @@ def add_sql_tools(
         )
     using = reader.using
     connection = connections[using]
-    backend = get_backend(connection)
-    backend.check(connection)
+    get_query(connection)
+    if connection.vendor == "postgresql":
+        try:
+            import psycopg  # noqa: F401
+        except ImportError:  # pragma: no cover
+            raise ImproperlyConfigured("The SQL tools need psycopg 3.") from None
+        if connection.settings_dict["OPTIONS"].get("assume_role"):
+            raise ImproperlyConfigured(
+                f"add_sql_tools() needs {using!r} to log in as the reader role,"
+                " not use assume_role, since queries could switch back to the"
+                " login role with set_config('role', ...)."
+            )
     if max_rows < 1:
         raise ImproperlyConfigured("max_rows must be at least 1.")
     if max_size < 1000:
@@ -135,7 +145,8 @@ def add_sql_tools(
     @server.tool(
         name=query_name,
         description=(
-            f"Run one read-only {backend.name} SELECT query and get the result rows,"
+            f"Run one read-only {connection.display_name} SELECT query and get the"
+            " result rows,"
             ' as JSON: "columns" names the columns, and "rows" holds one array'
             f" of values per row. Call {schema_name} to find the tables and"
             f" their columns first. At most {max_rows} rows are returned, and"
@@ -165,34 +176,22 @@ def run_query(
     """
     Run a query as the reader, returning the column names, up to max_rows
     rows, and whether rows were left unfetched. It runs in a transaction, or
-    savepoint, that is always rolled back, with the database's backend
-    making it read-only.
+    savepoint, that is always rolled back, made read-only by the database's
+    query context manager.
 
     Rows are fetched in batches, stopping at max_rows, once roughly max_size
     bytes of values have arrived, or once the timeout has passed, since on
     PostgreSQL, each FETCH gets its own statement timeout.
     """
-    using = reader.using
-    connection = connections[using]
-    backend = get_backend(connection)
+    connection = connections[reader.using]
+    query = get_query(connection)
     sql = sql.strip().rstrip(";").rstrip()
     if not sql:
         raise ToolError("The SQL is empty.")
     deadline = time.monotonic() + timeout
-    try:
-        with transaction.atomic(using=using):
-            try:
-                with backend.execute(connection, reader, sql, timeout) as cursor:
-                    columns = [column[0] for column in cursor.description]
-                    rows, more = _fetch(cursor, max_rows, max_size, deadline)
-            finally:
-                # Never commit: there is nothing to commit, and anything that
-                # slips past the read-only transaction is undone, including
-                # settings changed with set_config() on PostgreSQL. Requested
-                # last, as Django refuses queries after it.
-                connection.set_rollback(True)
-    finally:
-        backend.finish(connection)
+    with query(connection, reader, sql, timeout) as cursor:
+        columns = [column[0] for column in cursor.description]
+        rows, more = _fetch(cursor, max_rows, max_size, deadline)
     return columns, rows, more
 
 
@@ -332,7 +331,16 @@ def list_tables(
     parts = []
     if context:
         parts.append(context.strip())
-    parts.append(get_backend(connection).time_note(connection))
+    if connection.vendor == "sqlite":
+        parts.append(
+            "Dates and times are stored as ISO 8601 text, in UTC, so use"
+            " SQLite's date and time functions on them."
+        )
+    else:
+        parts.append(
+            f"Queries run with the time zone {connection.timezone_name}, which"
+            " applies to date functions on timestamp with time zone columns."
+        )
     lines = ["Tables:"]
     for table in table_list:
         line = f"- {quote_name(table.name)}"

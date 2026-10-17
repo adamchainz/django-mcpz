@@ -16,7 +16,7 @@ from django.db import connections
 from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.models import Field, Model
 
-from django_mcpz.sql.backends import get_backend
+from django_mcpz.sql.queries import get_query
 
 # Every reader defined, by database alias, for the post_migrate handler to
 # sync, after importing each app's mcp module.
@@ -74,8 +74,9 @@ class SQLReader:
                 raise ImproperlyConfigured(
                     f"SQLReader {name}={alias!r} isn't a database alias in DATABASES."
                 )
-        backend = get_backend(connections[using])
-        if backend.uses_roles and using == grantor:
+        get_query(connections[using])
+        # On PostgreSQL, the reader logs in as its own role.
+        if connections[using].vendor == "postgresql" and using == grantor:
             raise ImproperlyConfigured(
                 f"SQLReader needs using, the alias that logs in as the reader"
                 f" role, to differ from grantor, the alias whose role grants it"

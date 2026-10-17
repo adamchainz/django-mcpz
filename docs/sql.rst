@@ -179,8 +179,6 @@ The setup takes four steps: installing the app, a database alias for the role, a
    ``context`` is optional text at the top of the table list, for anything that applies across tables.
    See :func:`add_sql_tools` for the other options.
 
-In tests, the mirrored alias is still a separate connection, which sees only committed data, so test the tools with ``TransactionTestCase`` rather than ``TestCase``.
-
 What the LLM sees
 -----------------
 

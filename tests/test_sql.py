@@ -23,8 +23,8 @@ from django.test import (
 
 from django_mcpz.server import MCPServer, ToolError, public
 from django_mcpz.sql import readers as readers_module
-from django_mcpz.sql.backends import PostgreSQLBackend, get_backend
 from django_mcpz.sql.grants import sync_grants, sync_readers
+from django_mcpz.sql.queries import _release_advisory_locks, get_query
 from django_mcpz.sql.readers import SQLReader, all_readers
 from django_mcpz.sql.tools import (
     _fetch,
@@ -110,7 +110,7 @@ class AddSQLToolsTests(SimpleTestCase):
     def test_unsupported_database(self):
         connection = mock.Mock(vendor="mysql", display_name="MySQL", alias="mysql")
         with pytest.raises(ImproperlyConfigured) as excinfo:
-            get_backend(connection)
+            get_query(connection)
         assert str(excinfo.value) == (
             "The SQL tools support PostgreSQL and SQLite, not MySQL, for the"
             " database alias 'mysql'."
@@ -511,22 +511,22 @@ class EncodeResultTests(SimpleTestCase):
 
 class ReleaseAdvisoryLocksTests(SimpleTestCase):
     def test_not_connected(self):
-        PostgreSQLBackend().finish(mock.Mock(connection=None))
+        _release_advisory_locks(mock.Mock(connection=None))
 
     def test_closed(self):
-        PostgreSQLBackend().finish(mock.Mock(connection=mock.Mock(closed=True)))
+        _release_advisory_locks(mock.Mock(connection=mock.Mock(closed=True)))
 
     def test_needs_rollback(self):
         pg_connection = mock.Mock(closed=False)
         connection = mock.Mock(connection=pg_connection, needs_rollback=True)
-        PostgreSQLBackend().finish(connection)
+        _release_advisory_locks(connection)
         connection.cursor.assert_not_called()
 
     def test_failed_transaction(self):
         pg_connection = mock.Mock(closed=False)
         pg_connection.info.transaction_status = psycopg.pq.TransactionStatus.INERROR
         connection = mock.Mock(connection=pg_connection, needs_rollback=False)
-        PostgreSQLBackend().finish(connection)
+        _release_advisory_locks(connection)
         connection.cursor.assert_not_called()
 
 
@@ -1215,7 +1215,7 @@ class SQLiteErrorTests(SimpleTestCase):
 
         from django.db import OperationalError
 
-        from django_mcpz.sql.backends import _sqlite_error
+        from django_mcpz.sql.queries import _sqlite_error
 
         cause = sqlite3.OperationalError("database is locked")
         cause.sqlite_errorname = "SQLITE_BUSY"
