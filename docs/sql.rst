@@ -297,7 +297,8 @@ Define the reader on your usual alias, leaving ``using`` as ``"default"``:
         },
     )
 
-Instead, each query runs with an `authorizer callback <https://docs.python.org/3/library/sqlite3.html#sqlite3.Connection.set_authorizer>`__, which SQLite asks about every read and action as it compiles the query:
+Instead, each query runs on a fresh connection to the alias’s database, set to ``PRAGMA query_only``, and closed afterwards.
+That connection has an `authorizer callback <https://docs.python.org/3/library/sqlite3.html#sqlite3.Connection.set_authorizer>`__, which SQLite asks about every read and action as it compiles the query:
 
 * Reading the listed columns is allowed, as are reads inside views, whose own columns are checked when the query reads them.
   Reading anything else, including SQLite’s own tables like ``sqlite_master``, fails with “access to … is prohibited”.
@@ -309,8 +310,16 @@ Instead, each query runs with an `authorizer callback <https://docs.python.org/3
 
 * Python’s ``sqlite3`` module runs only one statement per query.
 
-A progress handler cancels queries that run longer than the timeout, and the query runs in a savepoint that is rolled back, like on PostgreSQL.
-The authorizer and progress handler are set only while the query runs, so the rest of your app uses the connection as usual.
+A progress handler on it cancels queries that run longer than the timeout.
 
-The checks are only as good as SQLite’s authorizer, and they run on your app’s own connection, so a gap in them, or a function your app registers on the connection, could reach any data the app can.
+The fresh connection leaves your app’s own connection untouched, including any authorizer or progress handler you set on it, which Python’s ``sqlite3`` has no way to read back and restore.
+It costs well under a millisecond per query for a database file.
+Hooks you add to the alias’s connection with |execute_wrapper|__ apply to it too.
+Like on PostgreSQL, the query sees only committed data, not uncommitted changes in the current request’s transaction.
+A private in-memory database, ``":memory:"``, can’t work, since each connection to one gets its own, empty, database.
+
+.. |execute_wrapper| replace:: ``execute_wrapper()``
+__ https://docs.djangoproject.com/en/stable/topics/db/instrumentation/
+
+The checks are only as good as SQLite’s authorizer, and the fresh connection reads the same database file as your app, with the same functions registered by its ``connection_created`` handlers, so a gap in them could reach any data the app can.
 For untrusted callers, PostgreSQL with a dedicated role is the stronger boundary.

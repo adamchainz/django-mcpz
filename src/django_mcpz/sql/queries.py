@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any
 
 from django.core.exceptions import ImproperlyConfigured
-from django.db import DatabaseError, transaction
+from django.db import DatabaseError, connections, transaction
 from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.backends.utils import CursorWrapper
 
@@ -248,10 +248,13 @@ def sqlite_query(
     connection: BaseDatabaseWrapper, reader: SQLReader, sql: str, timeout: float
 ) -> Iterator[CursorWrapper]:
     """
-    SQLite has no roles, so queries run on the alias's usual connection, in
-    a savepoint that is rolled back, with an authorizer callback allowing
-    only reads of the reader's columns, and a progress handler enforcing the
-    timeout. Python's sqlite3 module runs only one statement per execute().
+    SQLite has no roles, so queries run on a fresh connection to the alias's
+    database, closed afterwards, set to query only, with an authorizer
+    callback allowing only reads of the reader's columns, and a progress
+    handler enforcing the timeout. A fresh connection, since sqlite3 can't
+    read back an authorizer or progress handler the app may have set on its
+    own, to restore it. Python's sqlite3 module runs only one statement per
+    execute().
     """
     import sqlite3
 
@@ -288,25 +291,29 @@ def sqlite_query(
         # Non-zero interrupts the query.
         return int(time.monotonic() > deadline)
 
-    connection.ensure_connection()
-    sqlite_connection = connection.connection
-    with transaction.atomic(using=connection.alias):
-        try:
-            with connection.chunked_cursor() as cursor:
-                # Only around the query, not Django's own statements, such as
-                # the savepoints of the atomic block.
-                sqlite_connection.set_authorizer(authorize)
-                sqlite_connection.set_progress_handler(progress, _SQLITE_PROGRESS_STEPS)
-                try:
-                    cursor.execute(sql)
-                    yield cursor
-                finally:
-                    sqlite_connection.set_authorizer(None)
-                    sqlite_connection.set_progress_handler(None, 0)
-        except DatabaseError as exc:
-            raise _sqlite_error(exc, sql, timeout) from None
-        finally:
-            connection.set_rollback(True)
+    if connection.settings_dict["NAME"] in ("", ":memory:"):
+        raise ImproperlyConfigured(
+            f"The SQL tools can't query the database alias {connection.alias!r},"
+            " a private in-memory SQLite database, which only its own"
+            " connection can open."
+        )
+    fresh = connections.create_connection(connection.alias)
+    # Hooks registered on the alias's connection see the query too.
+    fresh.execute_wrappers = list(connection.execute_wrappers)
+    try:
+        with fresh.cursor() as cursor:
+            # A second layer under the authorizer, for this connection only.
+            cursor.execute("PRAGMA query_only = ON")
+        fresh.connection.set_authorizer(authorize)
+        fresh.connection.set_progress_handler(progress, _SQLITE_PROGRESS_STEPS)
+        with fresh.chunked_cursor() as cursor:
+            try:
+                cursor.execute(sql)
+                yield cursor
+            except DatabaseError as exc:
+                raise _sqlite_error(exc, sql, timeout) from None
+    finally:
+        fresh.close()
 
 
 def _sqlite_error(exc: DatabaseError, sql: str, timeout: float) -> Exception:

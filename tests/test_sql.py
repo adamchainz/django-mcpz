@@ -34,7 +34,7 @@ from django_mcpz.sql.tools import (
     list_tables,
     run_query,
 )
-from tests.mcp import sql_reader
+from tests.mcp import sql_reader, sqlite_reader
 from tests.models import (
     Child,
     Pair,
@@ -1059,11 +1059,11 @@ class SyncReadersTests(SimpleTestCase):
         assert "tests_x" in stdout.getvalue()
 
 
-class SQLiteServerTests(ServerTestCase, TestCase):
+class SQLiteServerTests(ServerTestCase, TransactionTestCase):
+    # Queries run on a fresh connection, which sees only committed data.
     url = "/sqlite-mcp"
 
-    @classmethod
-    def setUpTestData(cls):
+    def setUp(self):
         Widget.objects.create(name="Sprocket", price="4.50")
         Widget.objects.create(name="Gizmo", price="12.00", in_stock=False)
         Widget.objects.create(name="Doohickey", price="0.99")
@@ -1200,11 +1200,58 @@ class SQLiteServerTests(ServerTestCase, TestCase):
             " data."
         )
 
-    def test_authorizer_removed(self):
-        # After a query, the connection is unrestricted again, for the app.
-        self.query("SELECT name FROM tests_widget")
-        Widget.objects.create(name="Thingamajig", price="1.00")
+    def test_app_connection_untouched(self):
+        # The app's own authorizer, on its connection, survives queries.
+        import sqlite3
+
+        calls = []
+
+        def authorize(*args):
+            calls.append(args)
+            return sqlite3.SQLITE_OK
+
+        connection = connections["default"]
+        connection.ensure_connection()
+        connection.connection.set_authorizer(authorize)
+        try:
+            assert self.query("SELECT count(*) AS n FROM tests_widget") == {
+                "columns": ["n"],
+                "rows": [[3]],
+            }
+            Widget.objects.create(name="Thingamajig", price="1.00")
+        finally:
+            connection.connection.set_authorizer(None)
+        assert any(call[0] == sqlite3.SQLITE_INSERT for call in calls)
         assert Widget.objects.count() == 4
+
+    def test_execute_wrapper(self):
+        # Hooks registered on the alias's connection see the query.
+        seen = []
+
+        def wrapper(execute, sql, params, many, context):
+            seen.append(sql)
+            return execute(sql, params, many, context)
+
+        with connections["default"].execute_wrapper(wrapper):
+            self.query("SELECT 1 AS one")
+        assert "SELECT 1 AS one" in seen
+
+    def test_private_memory_database(self):
+        with (
+            mock.patch.dict(connections["default"].settings_dict, {"NAME": ":memory:"}),
+            pytest.raises(ImproperlyConfigured) as excinfo,
+        ):
+            run_query(
+                "SELECT 1",
+                reader=sqlite_reader,
+                max_rows=1,
+                max_size=1000,
+                timeout=1,
+            )
+        assert str(excinfo.value) == (
+            "The SQL tools can't query the database alias 'default', a private"
+            " in-memory SQLite database, which only its own connection can open."
+        )
 
 
 class SQLiteErrorTests(SimpleTestCase):
