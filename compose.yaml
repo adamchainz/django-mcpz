@@ -1,5 +1,5 @@
-# PostgreSQL for the tests and the example project, on a non-default port so
-# it doesn't clash with any local installation. Start it with:
+# PostgreSQL for the tests, on a non-default port so it doesn't clash with any
+# local installation. Start it with:
 #
 #   docker compose up -d --wait
 
@@ -9,8 +9,6 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      # For the example project. Tests create their own database.
-      POSTGRES_DB: mcpizza
     ports:
     - 127.0.0.1:55432:5432
     healthcheck:

@@ -7,9 +7,7 @@ The whole example project schema and data:
   Orders are random, but seeded, so every install sees the same trends:
   weekends are busier, and phone orders are dwindling as AI assistants take
   over.
-* The views behind the MenuItem and OrderLine models, for the SQL tools. On
-  PostgreSQL, the post_migrate handler in pizzeria.apps then maintains the
-  role that reads them.
+* The views behind the MenuItem and OrderLine models, for the SQL tools.
 """
 
 from __future__ import annotations

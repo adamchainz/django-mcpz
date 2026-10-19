@@ -5,7 +5,6 @@ import io
 from typing import Annotated, Any
 
 import msgspec
-from django.conf import settings
 from django.db.models import Sum
 from django.http import HttpRequest
 from django.urls import reverse
@@ -304,13 +303,9 @@ def menu_link(request: HttpRequest, params: MenuLinkParams) -> ResourceLink:
 
 # Ad hoc reporting over the read-only views, for questions the other tools
 # don't answer, like "which pizza sold best last month?" Only these columns
-# can be read: fields not named here stay hidden, even if they are added to
-# the models later. On PostgreSQL, queries run through the reader alias, which
-# logs in as a role that django_mcpz.sql allows to read only these columns,
-# after every migrate. On SQLite, which has no roles, they run on the default
-# alias, checked as each query runs.
+# can be read, checked as each query runs: fields not named here stay hidden,
+# even if they are added to the models later.
 reports_reader = SQLReader(
-    using="reader" if "reader" in settings.DATABASES else "default",
     tables={
         MenuItem: [
             "id",

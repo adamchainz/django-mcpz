@@ -14,7 +14,6 @@ The important code lives in these files:
 * ``pizzeria/mcp.py``: the MCP server and tools, in the app’s ``mcp`` module, following the `django-mcpz convention <https://django-mcpz.readthedocs.io/en/latest/servers.html>`__, plus the ``SQLReader`` listing the columns the SQL tools can read.
 * ``pizzeria/views.py`` and ``pizzeria/templates/pizzeria/menu.html``: the menu web page that the ``menu_link`` tool points at.
 * ``pizzeria/static/pizzeria/icon.svg``: the server’s icon, which clients show alongside its title.
-* ``pizzeria/settings.py``: the settings, choosing SQLite or PostgreSQL.
 
 The included tools are:
 
@@ -35,20 +34,10 @@ The included tools are:
 * ``menu_link``: a link to the menu web page for a date, past or future, for the user to open in a browser.
 
 * ``sql_schema`` and ``sql_query``: ad hoc reporting with SQL, over read-only views of the menu and three months of orders, with `the SQL tools <https://django-mcpz.readthedocs.io/en/latest/sql.html>`__.
-  On SQLite, they check each query’s reads as it runs, and on PostgreSQL, they connect as a role that can read only the listed columns, as below.
+  They check each query’s reads as it runs, allowing only the columns listed by the ``SQLReader`` in ``pizzeria/mcp.py``.
 
 Setup
 -----
-
-The example runs on either SQLite or PostgreSQL.
-SQLite needs no setup, so it’s the quickest way to try the example.
-PostgreSQL takes Docker, and runs the SQL tools as their own database role.
-
-Either way, the ``example`` dependency group adds the extra packages the example needs: Pillow, for the chart, and psycopg, for PostgreSQL.
-Migrating seeds the database with the menu and three months of orders.
-
-With SQLite
-~~~~~~~~~~~
 
 In this directory, run:
 
@@ -57,36 +46,9 @@ In this directory, run:
     uv run --group example manage.py migrate
     uv run --group example manage.py runserver
 
-The database is the ``db.sqlite3`` file in this directory.
+The ``example`` dependency group adds Pillow, for the chart.
+Migrating creates an SQLite database, the ``db.sqlite3`` file in this directory, seeded with the menu and three months of orders.
 To start afresh, delete it and migrate again.
-
-With PostgreSQL
-~~~~~~~~~~~~~~~
-
-The ``compose.yaml`` file in the repository root runs PostgreSQL in Docker, on port 55432, so it doesn’t clash with any PostgreSQL you already run.
-The tests use it too.
-From the repository root, start it with:
-
-.. code-block:: sh
-
-    docker compose up -d --wait
-
-Then, in this directory, run with the ``MCPIZZA_POSTGRES`` environment variable set, which switches the settings to that database:
-
-.. code-block:: sh
-
-    export MCPIZZA_POSTGRES=1
-    uv run --group example manage.py migrate
-    uv run --group example manage.py runserver
-
-On PostgreSQL, migrating also creates ``mcpizza_reader``, the role the SQL tools connect as through the ``reader`` database alias.
-The ``django_mcpz.sql`` app does this, granting the role the columns listed by the ``SQLReader`` in ``pizzeria/mcp.py``.
-It may only read the two report views, not the tables behind them.
-
-To start afresh, remove the container and its data from the repository root with ``docker compose down --volumes``, then start it and migrate again.
-
-Running
-~~~~~~~
 
 The ``runserver`` should launch the MCP server at http://127.0.0.1:8066/mcp, with the menu web page at http://127.0.0.1:8066/menu/2026-01-01/ for any date.
 
@@ -251,7 +213,7 @@ Example output:
 Test the SQL tools with ``claude``
 ----------------------------------
 
-With the server running, on either database, ask a question the other tools can’t answer:
+With the server running, ask a question the other tools can’t answer:
 
 .. code-block:: sh
 

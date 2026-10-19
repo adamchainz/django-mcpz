@@ -628,7 +628,6 @@ docs = [
 ]
 example = [
     { name = "pillow" },
-    { name = "psycopg", extra = ["binary"] },
 ]
 test = [
     { name = "coverage", extra = ["toml"] },
@@ -658,10 +657,7 @@ docs = [
     { name = "sphinx", specifier = ">=7.4.7" },
     { name = "sphinx-copybutton", specifier = ">=0.5.2" },
 ]
-example = [
-    { name = "pillow", specifier = ">=10.1" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.1" },
-]
+example = [{ name = "pillow", specifier = ">=10.1" }]
 test = [
     { name = "coverage", extras = ["toml"] },
     { name = "mcp", specifier = ">=2,<3" },
