@@ -129,7 +129,7 @@ enable_error_code = [
 strict = true
 plugins = [ "mypy_django_plugin.main" ]
 overrides = [
-  { module = "tests.*", allow_untyped_defs = true, disallow_untyped_calls = false },
+  { module = "tests.*", disallow_untyped_calls = false, allow_untyped_defs = true },
 ]
 
 [tool.django-stubs]
@@ -141,20 +141,20 @@ DJANGO_SETTINGS_MODULE = "tests.settings"
 strict = true
 
 [tool.coverage]
-run.branch = true
-run.data_file = ".coverage/cov"
-run.parallel = true
 run.source = [
   "django_mcpz",
   "tests",
 ]
+run.branch = true
+run.data_file = ".coverage/cov"
+run.parallel = true
 paths.source = [
   "src",
   ".tox/**/site-packages",
 ]
-report.show_missing = true
 report.skip_covered = true
 report.skip_empty = true
+report.show_missing = true
 
 [tool.rstcheck]
 ignore_directives = [ "setting" ]
