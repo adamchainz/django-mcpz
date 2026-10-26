@@ -5,14 +5,16 @@ Changelog
 Unreleased
 ----------
 
+* Add the ``django_mcpz.sql`` app, whose ``add_sql_tools()`` adds tools letting an LLM run read-only SQL queries against chosen columns of tables and views, plus describe them, on PostgreSQL or SQLite.
+  A ``SQLReader``, defined alongside the tools, lists those columns, and the app maintains the database role the queries run as to match, after every ``migrate``.
+  See :doc:`sql`.
+
+  `PR #42 <https://github.com/adamchainz/django-mcpz/pull/42>`__.
+
 * Document the convention of defining MCP servers in an ``mcp`` module of an app, an ``mcp.py`` file or ``mcp`` package, alongside its ``models.py`` and ``admin.py``.
   See :doc:`servers`.
 
   `PR #38 <https://github.com/adamchainz/django-mcpz/pull/38>`__.
-
-* Add the ``django_mcpz.sql`` app, whose ``add_sql_tools()`` adds tools letting an LLM run read-only SQL queries against chosen columns of tables and views, plus describe them, on PostgreSQL or SQLite.
-  A ``SQLReader``, defined alongside the tools, lists those columns, and the app maintains the database role the queries run as to match, after every ``migrate``.
-  See :doc:`sql`.
 
 1.2.0 (2026-10-26)
 ------------------
