@@ -2,8 +2,8 @@
 Changelog
 =========
 
-Unreleased
-----------
+1.2.0 (2026-10-26)
+------------------
 
 * Drop Python 3.10 support.
 
