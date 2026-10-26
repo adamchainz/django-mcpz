@@ -220,6 +220,11 @@ def _fetch(
 def _rough_size(value: Any) -> int:
     if isinstance(value, (str, bytes)):
         return len(value)
+    # Arrays and JSON.
+    if isinstance(value, (list, tuple)):
+        return 8 + sum(_rough_size(item) for item in value)
+    if isinstance(value, dict):
+        return 8 + sum(_rough_size(k) + _rough_size(v) for k, v in value.items())
     return 8
 
 
@@ -332,9 +337,12 @@ def list_tables(
     if context:
         parts.append(context.strip())
     if connection.vendor == "sqlite":
+        # Django stores them in UTC with USE_TZ, else in local time.
+        zone = connection.timezone_name
         parts.append(
-            "Dates and times are stored as ISO 8601 text, in UTC, so use"
-            " SQLite's date and time functions on them."
+            "Dates and times are stored as ISO 8601 text,"
+            f" {'in UTC' if zone == 'UTC' else f'in the time zone {zone}'},"
+            " so use SQLite's date and time functions on them."
         )
     else:
         parts.append(

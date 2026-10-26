@@ -19,6 +19,7 @@ from django.test import (
     TestCase,
     TransactionTestCase,
     modify_settings,
+    override_settings,
 )
 
 from django_mcpz.server import MCPServer, ToolError, public
@@ -28,6 +29,7 @@ from django_mcpz.sql.queries import _release_advisory_locks, get_query
 from django_mcpz.sql.readers import SQLReader, all_readers
 from django_mcpz.sql.tools import (
     _fetch,
+    _rough_size,
     add_sql_tools,
     describe_tables,
     encode_result,
@@ -278,6 +280,13 @@ class SQLReaderTests(SimpleTestCase):
 
 
 class ListTablesTests(SimpleTestCase):
+    @override_settings(USE_TZ=False, TIME_ZONE="Europe/London")
+    def test_sqlite_local_time(self):
+        assert list_tables(resolve({Widget: ["id"]}), using="default").startswith(
+            "Dates and times are stored as ISO 8601 text, in the time zone"
+            " Europe/London, so use SQLite's date and time functions on them.\n"
+        )
+
     def test_tables(self):
         assert list_tables(
             resolve(
@@ -575,6 +584,16 @@ class FetchTests(SimpleTestCase):
         rows, more = _fetch(cursor, max_rows=100, max_size=1000, deadline=1e12)
         assert (len(rows), more) == (10, False)
 
+    def test_huge_array(self):
+        cursor = self.cursor([(["x" * 300, {"k": "x" * 300}],)] * 30)
+        rows, more = _fetch(cursor, max_rows=100, max_size=1000, deadline=1e12)
+        assert (len(rows), more) == (2, True)
+
+    def test_rough_size(self):
+        assert (
+            _rough_size([1, ("ab", b"c"), {"d": "ef"}]) == 8 + 8 + 8 + 2 + 1 + 8 + 1 + 2
+        )
+
 
 class PostgresServerTests(ServerTestCase, TestCase):
     url = "/sql-postgres-mcp"
@@ -774,6 +793,19 @@ class PostgresServerTests(ServerTestCase, TestCase):
 
     def test_timeout(self):
         assert self.query("SELECT pg_sleep(5)") == (
+            "The query was cancelled after running for 1 seconds. Make it"
+            " cheaper, for example by filtering earlier or aggregating less"
+            " data."
+        )
+
+    def test_timeout_turned_off(self):
+        # Turning off statement_timeout takes effect for later FETCHes, but the
+        # watchdog still cancels the query.
+        assert self.query(
+            "SELECT set_config('statement_timeout', '0', true),"
+            " pg_sleep(CASE WHEN n > 1 THEN 5 ELSE 0 END)"
+            " FROM generate_series(1, 3) AS n"
+        ) == (
             "The query was cancelled after running for 1 seconds. Make it"
             " cheaper, for example by filtering earlier or aggregating less"
             " data."
@@ -1053,6 +1085,49 @@ class SyncGrantsTests(TestCase):
         assert not self.any_column_privilege("mcpz_test_reader", "tests_widget_view")
 
 
+class SyncPasswordTests(TransactionTestCase):
+    # Logging in with the password needs it committed, so this isn't a
+    # TestCase. With no available apps, nothing is flushed.
+    databases = {"postgres"}
+    available_apps: list[str] = []
+
+    def test_sets_password(self):
+        reader_settings = connections["reader"].settings_dict
+        with mock.patch.dict(reader_settings, {"PASSWORD": "rotated"}):
+            sync_grants(sql_postgres_reader)
+            assert self.password_works("rotated")
+        sync_grants(sql_postgres_reader)
+        assert self.password_works(reader_settings["PASSWORD"])
+        assert not self.password_works("rotated")
+
+    def password_works(self, password):
+        settings = connections["reader"].settings_dict
+        try:
+            psycopg.connect(
+                host=settings["HOST"],
+                port=settings["PORT"],
+                dbname=settings["NAME"],
+                user=settings["USER"],
+                password=password,
+            ).close()
+        except psycopg.OperationalError:
+            return False
+        return True
+
+    def test_keeps_password_without_permission(self):
+        with (
+            mock.patch.dict(
+                connections["reader"].settings_dict, {"PASSWORD": "rotated"}
+            ),
+            mock.patch(
+                "django_mcpz.sql.grants._ROLE_SQL", "SELECT false WHERE %s IS NOT NULL"
+            ),
+        ):
+            sync_grants(sql_postgres_reader)
+        assert not self.password_works("rotated")
+        assert self.password_works(connections["reader"].settings_dict["PASSWORD"])
+
+
 class SyncReadersTests(SimpleTestCase):
     def test_autodiscovers(self):
         # Readers are found by importing apps' mcp modules.
@@ -1161,6 +1236,50 @@ class SQLiteServerTests(ServerTestCase, TransactionTestCase):
     def test_unlisted_table(self):
         assert self.query("SELECT username FROM auth_user") == (
             "Query error: access to auth_user.username is prohibited"
+        )
+
+    def test_with_unlisted_column(self):
+        assert self.query(
+            "WITH x AS (SELECT in_stock FROM tests_widget) SELECT * FROM x"
+        ) == ("Query error: access to tests_widget.in_stock is prohibited")
+
+    def test_with_named_as_view(self):
+        # Reads inside the view and the common table expression look alike to
+        # the authorizer, both tagged tests_widget_view.
+        assert self.query(
+            "WITH tests_widget_view AS (SELECT in_stock FROM tests_widget)"
+            " SELECT * FROM tests_widget_view, main.tests_widget_view"
+        ) == ("Query error: access to tests_widget.in_stock is prohibited")
+
+    def test_with_view(self):
+        assert self.query(
+            "WITH x AS (SELECT name FROM tests_widget_view) SELECT count(*) AS n,"
+            " min(name) AS name FROM x"
+        ) == {"columns": ["n", "name"], "rows": [[3, "Doohickey"]]}
+
+    def test_count_view(self):
+        assert self.query("SELECT count(*) AS n FROM tests_widget_view") == {
+            "columns": ["n"],
+            "rows": [[3]],
+        }
+
+    def test_count_unlisted_table(self):
+        assert self.query("SELECT count(*) FROM auth_user") == (
+            "Query error: not authorized\n"
+            "Only a single SELECT statement is allowed, or WITH, VALUES, or TABLE."
+        )
+
+    def test_python_functions(self):
+        assert self.query("SELECT repeat('x', 3)") == (
+            "Query error: not authorized to use function: repeat"
+        )
+        assert self.query("SELECT 'a' REGEXP 'a'") == (
+            "Query error: not authorized to use function: REGEXP"
+        )
+
+    def test_too_long(self):
+        assert self.query("SELECT length(zeroblob(100000000)) AS n") == (
+            "Query error: string or blob too big"
         )
 
     def test_star(self):

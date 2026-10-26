@@ -81,7 +81,7 @@ The setup takes four steps: installing the app, a database alias for the role, a
 
    After every ``migrate``, the app makes the role match the reader:
 
-   * it creates the role if it doesn’t exist, with the alias’s ``PASSWORD``;
+   * it creates the role if it doesn’t exist, with the alias’s ``PASSWORD``, or else sets that ``PASSWORD``, so rotating it takes effect, if the alias has one and the grantor may change it;
    * grants it ``CONNECT`` on the database and ``USAGE`` on the tables’ schemas;
    * revokes everything previously granted to it on tables and columns, then grants ``SELECT`` on exactly the listed columns.
 
@@ -254,8 +254,8 @@ The tools add more limits on top:
   This accepts one statement only, so no ``; COMMIT; ...`` tricks, and that statement must be a query: ``SELECT``, ``WITH``, ``VALUES``, or ``TABLE``.
   Data-modifying statements are rejected even inside ``WITH``.
 
-* A ``statement_timeout`` stops long-running queries.
-  Changing it with ``set_config()`` inside a query doesn’t affect that query, and the change is rolled back afterwards.
+* A watchdog thread cancels the query once the timeout has passed, including fetching its rows.
+  A ``statement_timeout`` also stops each statement that runs too long, but the query could turn it off with ``set_config()``, which the watchdog doesn’t depend on.
 
 * Rows are fetched from the cursor in batches, stopping at ``max_rows``, once values totalling ``max_size`` have arrived, or once the timeout has passed.
   The first batch is a single row, and later ones are sized to fit what remains of ``max_size``, so a query for millions of rows, or for huge values, transfers only the first few.
@@ -273,7 +273,7 @@ Some things the role can still do, given PostgreSQL’s defaults:
 
 * Take advisory locks, which are database-wide, for up to the timeout, which could block your application if it uses them.
 
-* Use CPU, memory, and I/O for roughly up to twice the timeout, per call, as the query and fetching the rows are timed separately.
+* Use CPU, memory, and I/O for up to the timeout, per call.
   A row is transferred in full, so a query returning a huge value, such as from ``repeat('x', 100000000)``, uses that much memory in your Django process before it is shortened.
 
 Use your server’s ``auth`` and the ``permission`` argument to limit who can call the tools, and consider pointing the alias at a read replica.
@@ -300,20 +300,21 @@ Define the reader on your usual alias, leaving ``using`` as ``"default"``:
 Instead, each query runs on a fresh connection to the alias’s database, set to ``PRAGMA query_only``, and closed afterwards.
 That connection has an `authorizer callback <https://docs.python.org/3/library/sqlite3.html#sqlite3.Connection.set_authorizer>`__, which SQLite asks about every read and action as it compiles the query:
 
-* Reading the listed columns is allowed, as are reads inside views, whose own columns are checked when the query reads them.
+* Reading the listed columns is allowed, as is counting the rows of the listed tables, with ``count(*)``.
   Reading anything else, including SQLite’s own tables like ``sqlite_master``, fails with “access to … is prohibited”.
 
-* Reads that touch no column, such as ``count(*)``, are allowed for any table, so the LLM can count rows in tables it can’t read.
-  SQLite turns some queries on views into such reads of the tables behind them, so this is needed for views to work.
-
-* Every other action is denied: writes, ``ATTACH``, ``PRAGMA``, transaction control, and functions that reach outside the database, like ``load_extension()``.
+* Every other action is denied: writes, ``ATTACH``, ``PRAGMA``, transaction control, functions that reach outside the database, like ``load_extension()``, and the functions Django defines in Python whose cost is unbounded, ``LPAD()``, ``RPAD()``, ``REPEAT()``, and ``REGEXP``.
 
 * Python’s ``sqlite3`` module runs only one statement per query.
 
-A progress handler on it cancels queries that run longer than the timeout.
+The authorizer sees reads inside views as reads of the tables behind them, tagged with the view’s name, but it sees reads inside a ``WITH`` clause the same way, tagged with names the query picks, which could match a view’s.
+So before running the query, the tools compile it, with ``EXPLAIN``, against an in-memory copy of the database’s schema, in which each view is a table of its columns, where the authorizer allows only the listed columns, wherever they’re read.
+Once that passes, the real query may read what its views read.
+
+A progress handler on the connection cancels queries that run longer than the timeout, and a length limit stops any query making a string or blob longer than 16 MiB, failing with “string or blob too big”.
 
 The fresh connection leaves your app’s own connection untouched, including any authorizer or progress handler you set on it, which Python’s ``sqlite3`` has no way to read back and restore.
-It costs well under a millisecond per query for a database file.
+With the schema copy, it costs a millisecond or two per query, for a database file of a dozen tables, more with more tables.
 Hooks you add to the alias’s connection with |execute_wrapper|__ apply to it too.
 Like on PostgreSQL, the query sees only committed data, not uncommitted changes in the current request’s transaction.
 A private in-memory database, ``":memory:"``, can’t work, since each connection to one gets its own, empty, database.

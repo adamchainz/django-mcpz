@@ -6,6 +6,7 @@ it to one read-only query, timing it out, and reporting its errors.
 from __future__ import annotations
 
 import contextlib
+import threading
 import time
 from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any
@@ -127,10 +128,20 @@ def postgresql_query(
                     # Django loads jsonb as text, for JSONField. Load it as
                     # JSON here, so it's nested JSON in results.
                     cursor.cursor.adapters.register_loader("jsonb", JsonbLoader)
-                    # A newline ends any trailing -- comment, before the rest
-                    # of the statement psycopg sends.
-                    cursor.execute(f"{sql}\n")
-                    yield cursor
+                    # statement_timeout times each FETCH separately, and the
+                    # query can change it with set_config(), so this cancels
+                    # the whole query, rows and all, after the timeout.
+                    watchdog = threading.Timer(
+                        timeout, _cancel, [connection.connection]
+                    )
+                    watchdog.start()
+                    try:
+                        # A newline ends any trailing -- comment, before the
+                        # rest of the statement psycopg sends.
+                        cursor.execute(f"{sql}\n")
+                        yield cursor
+                    finally:
+                        watchdog.cancel()
             except DatabaseError as exc:
                 raise _postgresql_error(exc, sql, timeout, declare_length) from None
             finally:
@@ -141,6 +152,11 @@ def postgresql_query(
                 connection.set_rollback(True)
     finally:
         _release_advisory_locks(connection)
+
+
+def _cancel(pg_connection: Any) -> None:
+    # cancel_safe() is new in psycopg 3.2.
+    getattr(pg_connection, "cancel_safe", pg_connection.cancel)()
 
 
 def _release_advisory_locks(connection: BaseDatabaseWrapper) -> None:
@@ -229,10 +245,25 @@ def _postgresql_message(error: Any, sql: str, declare_length: int) -> str:
 # Table-valued functions that read no stored data, which the authorizer sees
 # as reads of tables by their names.
 _SQLITE_TABLE_FUNCTIONS = frozenset({"json_each", "json_tree", "generate_series"})
-# Functions that reach outside the database.
+# Functions that reach outside the database, and those Django defines in
+# Python, which can take unbounded memory or time, beyond the reach of
+# SQLite's length limit and the progress handler.
 _SQLITE_DENIED_FUNCTIONS = frozenset(
-    {"load_extension", "fts3_tokenizer", "readfile", "writefile", "edit"}
+    {
+        "load_extension",
+        "fts3_tokenizer",
+        "readfile",
+        "writefile",
+        "edit",
+        "lpad",
+        "rpad",
+        "repeat",
+        "regexp",
+    }
 )
+# The longest string or blob a query may make, bounding the memory that one
+# call to a function like zeroblob() or printf() can take.
+_SQLITE_MAX_LENGTH = 16 * 1024 * 1024
 # SQLite result codes for errors in the query itself, which the LLM can fix.
 # Others, such as the database being locked or corrupt, are raised as such.
 _SQLITE_QUERY_ERRORS = frozenset(
@@ -258,33 +289,6 @@ def sqlite_query(
     """
     import sqlite3
 
-    allowed = {
-        (table.name, column) for table in reader.tables for column in table.columns
-    }
-
-    def authorize(
-        action: int,
-        arg1: str | None,
-        arg2: str | None,
-        database: str | None,
-        source: str | None,
-    ) -> int:
-        if action in (sqlite3.SQLITE_SELECT, sqlite3.SQLITE_RECURSIVE):
-            return sqlite3.SQLITE_OK
-        if action == sqlite3.SQLITE_READ and (
-            # Inside a view, whose own columns are checked at the top
-            # level, or a trigger. Both are the developer's SQL.
-            source is not None
-            # No column, as for count(*), so no data.
-            or arg2 == ""
-            or (arg1, arg2) in allowed
-            or arg1 in _SQLITE_TABLE_FUNCTIONS
-        ):
-            return sqlite3.SQLITE_OK
-        if action == sqlite3.SQLITE_FUNCTION and arg2 not in _SQLITE_DENIED_FUNCTIONS:
-            return sqlite3.SQLITE_OK
-        return sqlite3.SQLITE_DENY
-
     deadline = time.monotonic() + timeout
 
     def progress() -> int:
@@ -304,8 +308,13 @@ def sqlite_query(
         with fresh.cursor() as cursor:
             # A second layer under the authorizer, for this connection only.
             cursor.execute("PRAGMA query_only = ON")
-        fresh.connection.set_authorizer(authorize)
+        try:
+            _sqlite_check(fresh, reader, sql)
+        except DatabaseError as exc:
+            raise _sqlite_error(exc, sql, timeout) from None
+        fresh.connection.set_authorizer(_sqlite_authorizer(reader, checked=True))
         fresh.connection.set_progress_handler(progress, _SQLITE_PROGRESS_STEPS)
+        fresh.connection.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, _SQLITE_MAX_LENGTH)
         with fresh.chunked_cursor() as cursor:
             try:
                 cursor.execute(sql)
@@ -314,6 +323,105 @@ def sqlite_query(
                 raise _sqlite_error(exc, sql, timeout) from None
     finally:
         fresh.close()
+
+
+def _sqlite_check(fresh: BaseDatabaseWrapper, reader: SQLReader, sql: str) -> None:
+    """
+    Check the query's reads against a copy of the database's schema, in
+    memory, with every view made a table of its columns, compiling the query
+    with EXPLAIN, not running it.
+
+    In the real database, the authorizer sees reads inside views as reads of
+    the tables behind them, tagged with the view's name, as it should allow.
+    But it sees reads inside a WITH clause's common table expressions the
+    same way, tagged with their names, which the query picks, so can match a
+    view's. With no views, no read needs allowing for its tag, so a query
+    that passes reads only the reader's columns, as the views and tables it
+    names are the same in the real database.
+    """
+    import sqlite3
+
+    from django_mcpz.sql.readers import quote_name
+
+    real = fresh.connection
+    objects = real.execute(
+        "SELECT type, name, sql FROM sqlite_master"
+        " WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite^_%' ESCAPE '^'"
+    ).fetchall()
+    shadow = type(fresh)({**fresh.settings_dict, "NAME": ":memory:"}, fresh.alias)
+    try:
+        shadow.ensure_connection()
+        for kind, name, create in objects:
+            if kind == "table" and not create.upper().startswith("CREATE VIRTUAL"):
+                try:
+                    shadow.connection.execute(create)
+                    continue
+                except sqlite3.Error:
+                    pass
+            quoted = quote_name(name)
+            columns = [
+                quote_name(column)
+                for _, column, *_ in real.execute(f"PRAGMA table_xinfo({quoted})")
+            ]
+            shadow.connection.execute(f"CREATE TABLE {quoted} ({', '.join(columns)})")
+        shadow.connection.set_authorizer(
+            _sqlite_authorizer(
+                reader,
+                checked=False,
+                schema=frozenset(name for _, name, _ in objects),
+            )
+        )
+        with shadow.cursor() as cursor:
+            cursor.execute(f"EXPLAIN {sql}")
+    finally:
+        shadow.close()
+
+
+def _sqlite_authorizer(
+    reader: SQLReader, *, checked: bool, schema: frozenset[str] = frozenset()
+) -> Callable[..., int]:
+    """
+    An authorizer allowing only reads of the reader's columns, where schema
+    holds the names of the database's tables and views. Once the query is
+    checked, with _sqlite_check(), it also allows reads inside views and
+    common table expressions, which the check covered.
+    """
+    import sqlite3
+
+    allowed = {
+        (table.name, column) for table in reader.tables for column in table.columns
+    }
+    tables = {table.name for table in reader.tables}
+
+    def authorize(
+        action: int,
+        arg1: str | None,
+        arg2: str | None,
+        database: str | None,
+        source: str | None,
+    ) -> int:
+        if action in (sqlite3.SQLITE_SELECT, sqlite3.SQLITE_RECURSIVE):
+            return sqlite3.SQLITE_OK
+        if action == sqlite3.SQLITE_READ and (
+            (checked and source is not None)
+            or (arg1, arg2) in allowed
+            # No column, as for count(*), so no data, but only of the
+            # reader's tables, or of common table expressions, not tables in
+            # the schema. Once checked, also of tables behind views, which
+            # SQLite reads this way for count(*) on a view.
+            or (arg2 == "" and (checked or arg1 in tables or arg1 not in schema))
+            or arg1 in _SQLITE_TABLE_FUNCTIONS
+        ):
+            return sqlite3.SQLITE_OK
+        if (
+            action == sqlite3.SQLITE_FUNCTION
+            and arg2 is not None
+            and arg2.lower() not in _SQLITE_DENIED_FUNCTIONS
+        ):
+            return sqlite3.SQLITE_OK
+        return sqlite3.SQLITE_DENY
+
+    return authorize
 
 
 def _sqlite_error(exc: DatabaseError, sql: str, timeout: float) -> Exception:

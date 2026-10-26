@@ -11,7 +11,6 @@ from typing import Any, TextIO
 from django.core.exceptions import ImproperlyConfigured
 from django.db import connections, transaction
 from django.utils.module_loading import autodiscover_modules
-from psycopg import sql as pg_sql
 
 from django_mcpz.sql.readers import SQLReader, all_readers, quote_name
 
@@ -43,11 +42,14 @@ def sync_grants(reader: SQLReader) -> list[str]:
     nothing else.
 
     This runs on the reader's grantor connection. It creates the role if it's
-    missing, with the reader alias's password, grants it CONNECT on the
+    missing, with the reader alias's password, or else sets that password,
+    if the grantor may and the alias has one, grants it CONNECT on the
     database and USAGE on the tables' schemas, revokes everything it was
     granted on tables and columns, then grants SELECT on the columns. It all
     happens in one transaction, so the role never sees a half-way state.
     """
+    from psycopg import sql as pg_sql
+
     using = reader.grantor
     connection = connections[using]
     if connection.vendor != "postgresql":
@@ -72,12 +74,19 @@ def sync_grants(reader: SQLReader) -> list[str]:
         pg_connection = connection.connection
         with pg_connection.cursor() as cursor:
             role_id = pg_sql.Identifier(role)
-            cursor.execute("SELECT FROM pg_roles WHERE rolname = %s", [role])
-            if cursor.fetchone() is None:
+            password = pg_sql.Literal(reader_settings["PASSWORD"] or None)
+            cursor.execute(_ROLE_SQL, [role])
+            row = cursor.fetchone()
+            if row is None:
                 cursor.execute(
                     pg_sql.SQL("CREATE ROLE {} LOGIN PASSWORD {}").format(
-                        role_id, pg_sql.Literal(reader_settings["PASSWORD"] or None)
+                        role_id, password
                     )
+                )
+            elif row[0] and reader_settings["PASSWORD"]:
+                # Keep the password matching the setting, as it's rotated.
+                cursor.execute(
+                    pg_sql.SQL("ALTER ROLE {} PASSWORD {}").format(role_id, password)
                 )
             cursor.execute(
                 pg_sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(
@@ -124,6 +133,20 @@ def sync_grants(reader: SQLReader) -> list[str]:
                     )
                 )
     return missing
+
+
+# Whether the grantor may change the role's password, if the role exists: a
+# superuser, or one with CREATEROLE, which from PostgreSQL 16 also needs the
+# ADMIN option on the role, as it has on roles it created.
+_ROLE_SQL = """
+SELECT
+    grantor.rolsuper OR grantor.rolcreaterole AND (
+        current_setting('server_version_num')::int < 160000
+        OR pg_has_role(grantor.oid, role.oid, 'MEMBER WITH ADMIN OPTION')
+    )
+FROM pg_roles role, pg_roles grantor
+WHERE role.rolname = %s AND grantor.rolname = current_user
+"""
 
 
 # A table or view, by name, with its schema and current columns.
