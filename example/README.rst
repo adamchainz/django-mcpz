@@ -44,13 +44,16 @@ In this directory, run:
     uv run --group example manage.py runserver
 
 The ``example`` dependency group adds Pillow, for the chart.
-Migrating creates an SQLite database seeded with the menu.
+Migrating creates an SQLite database, the ``db.sqlite3`` file in this directory, seeded with the menu.
+To start afresh, delete it and migrate again.
+
 The ``runserver`` should launch the MCP server at http://127.0.0.1:8066/mcp, with the menu web page at http://127.0.0.1:8066/menu/2026-01-01/ for any date.
 
 This example is unauthenticated (``auth=public``) and served on localhost only, as it’s a local demo, not something to expose to a network.
 See the `authentication docs <https://django-mcpz.readthedocs.io/en/latest/servers.html#authentication>`__ for adding auth.
 
 Once the server is running, any MCP client should be able to connect.
+The sections below show some.
 
 Test with ``llm``
 -----------------
