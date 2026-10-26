@@ -11,7 +11,7 @@ The important code lives in these files:
 * ``pizzeria/models.py``: the models.
 * ``pizzeria/migrations/0002_menu.py``: the migration that seeds data.
   Specials are dated relative to the day you run the migrations.
-* ``pizzeria/mcp.py``: the MCP server and tools.
+* ``pizzeria/mcp.py``: the MCP server and tools, in the app’s ``mcp`` module, following the `django-mcpz convention <https://django-mcpz.readthedocs.io/en/latest/servers.html>`__.
 * ``pizzeria/views.py`` and ``pizzeria/templates/pizzeria/menu.html``: the menu web page that the ``menu_link`` tool points at.
 * ``pizzeria/static/pizzeria/icon.svg``: the server’s icon, which clients show alongside its title.
 

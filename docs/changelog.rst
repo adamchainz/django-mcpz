@@ -2,6 +2,14 @@
 Changelog
 =========
 
+Unreleased
+----------
+
+* Document the convention of defining MCP servers in an ``mcp`` module of an app, an ``mcp.py`` file or ``mcp`` package, alongside its ``models.py`` and ``admin.py``.
+  See :doc:`servers`.
+
+  `PR #38 <https://github.com/adamchainz/django-mcpz/pull/38>`__.
+
 1.2.0 (2026-10-26)
 ------------------
 
