@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import io
 import ipaddress
+import time
 import uuid
 from decimal import Decimal
 from typing import Any
@@ -25,7 +26,7 @@ from django.test import (
 from django_mcpz.server import MCPServer, ToolError, public
 from django_mcpz.sql import readers as readers_module
 from django_mcpz.sql.grants import sync_grants, sync_readers
-from django_mcpz.sql.queries import _release_advisory_locks, get_query
+from django_mcpz.sql.queries import _release_advisory_locks, _watchdog, get_query
 from django_mcpz.sql.readers import SQLReader, all_readers
 from django_mcpz.sql.tools import (
     _fetch,
@@ -552,6 +553,37 @@ class ReleaseAdvisoryLocksTests(SimpleTestCase):
         connection = mock.Mock(connection=pg_connection, needs_rollback=False)
         _release_advisory_locks(connection)
         connection.cursor.assert_not_called()
+
+
+class WatchdogTests(SimpleTestCase):
+    def test_cancels(self):
+        pg_connection = mock.Mock(spec=["cancel_safe"])
+        with _watchdog(pg_connection, 0.01):
+            time.sleep(0.1)
+        pg_connection.cancel_safe.assert_called_once_with()
+
+    def test_finished(self):
+        pg_connection = mock.Mock(spec=["cancel_safe"])
+        with _watchdog(pg_connection, 0.05):
+            pass
+        time.sleep(0.1)
+        pg_connection.cancel_safe.assert_not_called()
+
+    def test_finished_while_firing(self):
+        # The timer fires as the block finishes, and waits for the lock,
+        # which the block holds until it has marked itself finished.
+        pg_connection = mock.Mock(spec=["cancel_safe"])
+        with mock.patch("threading.Timer") as timer:
+            with _watchdog(pg_connection, 1):
+                cancel = timer.call_args.args[1]
+            cancel()
+        pg_connection.cancel_safe.assert_not_called()
+
+    def test_old_psycopg(self):
+        pg_connection = mock.Mock(spec=["cancel"])
+        with _watchdog(pg_connection, 0.01):
+            time.sleep(0.1)
+        pg_connection.cancel.assert_called_once_with()
 
 
 class FetchTests(SimpleTestCase):

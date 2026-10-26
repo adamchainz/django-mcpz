@@ -131,17 +131,11 @@ def postgresql_query(
                     # statement_timeout times each FETCH separately, and the
                     # query can change it with set_config(), so this cancels
                     # the whole query, rows and all, after the timeout.
-                    watchdog = threading.Timer(
-                        timeout, _cancel, [connection.connection]
-                    )
-                    watchdog.start()
-                    try:
+                    with _watchdog(connection.connection, timeout):
                         # A newline ends any trailing -- comment, before the
                         # rest of the statement psycopg sends.
                         cursor.execute(f"{sql}\n")
                         yield cursor
-                    finally:
-                        watchdog.cancel()
             except DatabaseError as exc:
                 raise _postgresql_error(exc, sql, timeout, declare_length) from None
             finally:
@@ -154,9 +148,35 @@ def postgresql_query(
         _release_advisory_locks(connection)
 
 
-def _cancel(pg_connection: Any) -> None:
-    # cancel_safe() is new in psycopg 3.2.
-    getattr(pg_connection, "cancel_safe", pg_connection.cancel)()
+@contextlib.contextmanager
+def _watchdog(pg_connection: Any, timeout: float) -> Iterator[None]:
+    """
+    Cancel whatever the connection is running once the timeout has passed,
+    unless the block has finished by then. The lock stops a cancel going out
+    after it finishes, which could cancel the next statement, such as
+    releasing advisory locks. One sent before then reaches the query, or the
+    session idle once the query is done, where PostgreSQL ignores it.
+    """
+    lock = threading.Lock()
+    finished = False
+
+    def cancel() -> None:
+        with lock:
+            if not finished:
+                # cancel_safe() is new in psycopg 3.2.
+                if hasattr(pg_connection, "cancel_safe"):
+                    pg_connection.cancel_safe()
+                else:
+                    pg_connection.cancel()
+
+    timer = threading.Timer(timeout, cancel)
+    timer.start()
+    try:
+        yield
+    finally:
+        with lock:
+            finished = True
+        timer.cancel()
 
 
 def _release_advisory_locks(connection: BaseDatabaseWrapper) -> None:
@@ -322,7 +342,14 @@ def sqlite_query(
             except DatabaseError as exc:
                 raise _sqlite_error(exc, sql, timeout) from None
     finally:
-        fresh.close()
+        _sqlite_close(fresh)
+
+
+def _sqlite_close(connection: BaseDatabaseWrapper) -> None:
+    # Django's close() leaves in-memory databases open, to keep their data,
+    # such as in tests, but these connections are done with.
+    if connection.connection is not None:
+        connection.connection.close()
 
 
 def _sqlite_check(fresh: BaseDatabaseWrapper, reader: SQLReader, sql: str) -> None:
@@ -374,7 +401,7 @@ def _sqlite_check(fresh: BaseDatabaseWrapper, reader: SQLReader, sql: str) -> No
         with shadow.cursor() as cursor:
             cursor.execute(f"EXPLAIN {sql}")
     finally:
-        shadow.close()
+        _sqlite_close(shadow)
 
 
 def _sqlite_authorizer(
