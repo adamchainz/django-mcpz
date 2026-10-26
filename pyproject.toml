@@ -52,6 +52,7 @@ urls.Repository = "https://github.com/adamchainz/django-mcpz"
 test = [
   "coverage[toml]",
   "mcp>=2,<3",
+  "psycopg[binary]>=3.1",
   "pytest>=9",
   "pytest-django",
   "pytest-randomly",
