@@ -74,5 +74,7 @@ ROOT_URLCONF = "tests.urls"
 USE_TZ = True
 STATIC_URL = "static/"
 
-# Part uses db_table_comment, to test describing it, which SQLite ignores.
-SILENCED_SYSTEM_CHECKS = ["models.W046"]
+SILENCED_SYSTEM_CHECKS = [
+    # “SQLite does not support comments on tables”
+    "models.W046",
+]
