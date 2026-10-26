@@ -577,16 +577,18 @@ bearer_elicitation_server.tool(
 )(confirm_as_user)
 
 
-sql_server = MCPServer(name="sql-server", version="1.0.0", auth=public)
-# The reader alias's role may read these columns, and nothing else.
-sql_reader = SQLReader(
+# On PostgreSQL, the reader alias, whose role may read only these columns.
+sql_postgres_reader = SQLReader(
     using="reader",
     grantor="postgres",
     tables={WidgetView: ["id", "name", "price"]},
 )
+sql_postgres_server = MCPServer(
+    name="sql-postgres-server", version="1.0.0", auth=public
+)
 add_sql_tools(
-    sql_server,
-    reader=sql_reader,
+    sql_postgres_server,
+    reader=sql_postgres_reader,
     context="Test widgets.",
     max_rows=2,
     timeout=1,
@@ -595,11 +597,11 @@ add_sql_tools(
 
 # On SQLite, the default alias, with no roles: the tools allow reading only
 # these columns as each query runs.
-sqlite_reader = SQLReader(
+sql_sqlite_reader = SQLReader(
     tables={
         Widget: ["id", "name", "price"],
         WidgetView: ["id", "name"],
     },
 )
-sqlite_server = MCPServer(name="sqlite-server", version="1.0.0", auth=public)
-add_sql_tools(sqlite_server, reader=sqlite_reader, max_rows=2, timeout=1)
+sql_sqlite_server = MCPServer(name="sql-sqlite-server", version="1.0.0", auth=public)
+add_sql_tools(sql_sqlite_server, reader=sql_sqlite_reader, max_rows=2, timeout=1)

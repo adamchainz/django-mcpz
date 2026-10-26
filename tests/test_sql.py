@@ -34,7 +34,7 @@ from django_mcpz.sql.tools import (
     list_tables,
     run_query,
 )
-from tests.mcp import sql_reader, sqlite_reader
+from tests.mcp import sql_postgres_reader, sql_sqlite_reader
 from tests.models import (
     Child,
     Pair,
@@ -92,7 +92,7 @@ def resolve(tables):
 class AddSQLToolsTests(SimpleTestCase):
     def add(self, **kwargs):
         server = MCPServer(name="s", version="1", auth=public)
-        add_sql_tools(server, **{"reader": sql_reader, **kwargs})
+        add_sql_tools(server, **{"reader": sql_postgres_reader, **kwargs})
         return server
 
     def error(self, **kwargs):
@@ -146,19 +146,24 @@ class SQLReaderTests(SimpleTestCase):
         return str(excinfo.value)
 
     def test_reader(self):
-        assert (sql_reader.using, sql_reader.grantor) == ("reader", "postgres")
-        assert [table.name for table in sql_reader.tables] == ["tests_widget_view"]
-        assert sql_reader.tables[0].columns == ["id", "name", "price"]
+        assert (sql_postgres_reader.using, sql_postgres_reader.grantor) == (
+            "reader",
+            "postgres",
+        )
+        assert [table.name for table in sql_postgres_reader.tables] == [
+            "tests_widget_view"
+        ]
+        assert sql_postgres_reader.tables[0].columns == ["id", "name", "price"]
 
     def test_immutable(self):
         with pytest.raises(AttributeError) as excinfo:
-            sql_reader.using = "postgres"
+            sql_postgres_reader.using = "postgres"
         assert str(excinfo.value) == "SQLReader is immutable."
         with pytest.raises(AttributeError):
-            del sql_reader.using
+            del sql_postgres_reader.using
 
     def test_registered(self):
-        assert sql_reader in all_readers()
+        assert sql_postgres_reader in all_readers()
 
     def test_same_again(self):
         # A second, identical definition is fine, and replaces the first.
@@ -561,8 +566,8 @@ class FetchTests(SimpleTestCase):
         assert (len(rows), more) == (10, False)
 
 
-class SQLServerTests(ServerTestCase, TestCase):
-    url = "/sql-mcp"
+class PostgresServerTests(ServerTestCase, TestCase):
+    url = "/sql-postgres-mcp"
     databases = {"postgres", "reader"}
 
     def call(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
@@ -829,7 +834,7 @@ class RunQueryTransactionTests(TransactionTestCase):
         with pytest.raises(ToolError) as excinfo:
             run_query(
                 "SELECT set_config('transaction_read_only', 'off', true)",
-                reader=sql_reader,
+                reader=sql_postgres_reader,
                 max_rows=10,
                 max_size=1000,
                 timeout=1,
@@ -861,11 +866,15 @@ class RunQueryTransactionTests(TransactionTestCase):
                 "Query error: permission denied for table tests_widget"
             )
         finally:
-            sync_grants(sql_reader)
+            sync_grants(sql_postgres_reader)
 
     def test_autocommit_restored(self):
         assert run_query(
-            "SELECT 1", reader=sql_reader, max_rows=10, max_size=1000, timeout=1
+            "SELECT 1",
+            reader=sql_postgres_reader,
+            max_rows=10,
+            max_size=1000,
+            timeout=1,
         ) == (
             ["?column?"],
             [(1,)],
@@ -909,7 +918,7 @@ class SyncGrantsTests(TestCase):
     def test_view(self):
         # As the app does after migrating. Grants are per column, so not on
         # the table as a whole.
-        assert sync_grants(sql_reader) == []
+        assert sync_grants(sql_postgres_reader) == []
         assert self.any_column_privilege("mcpz_test_reader", "tests_widget_view")
         assert not self.table_privilege("tests_widget_view")
         assert not self.table_privilege("tests_widget")
@@ -952,7 +961,7 @@ class SyncGrantsTests(TestCase):
             connections["reader"].settings_dict,
             {"USER": "mcpz_test_new", "PASSWORD": "secret"},
         ):
-            sync_grants(sql_reader)
+            sync_grants(sql_postgres_reader)
         assert self.fetch(
             "SELECT rolcanlogin, rolsuper FROM pg_roles WHERE rolname = %s",
             ["mcpz_test_new"],
@@ -972,7 +981,7 @@ class SyncGrantsTests(TestCase):
             mock.patch.dict(connections["reader"].settings_dict, {"USER": ""}),
             pytest.raises(ImproperlyConfigured) as excinfo,
         ):
-            sync_grants(sql_reader)
+            sync_grants(sql_postgres_reader)
         assert str(excinfo.value) == (
             "The 'reader' database alias needs to set USER, the role it logs in as."
         )
@@ -985,7 +994,7 @@ class SyncGrantsTests(TestCase):
             ),
             pytest.raises(ImproperlyConfigured) as excinfo,
         ):
-            sync_grants(sql_reader)
+            sync_grants(sql_postgres_reader)
         assert str(excinfo.value).startswith(
             "The 'reader' and 'postgres' database aliases log in as the same role,"
         )
@@ -1035,7 +1044,7 @@ class SyncReadersTests(SimpleTestCase):
             sync.assert_not_called()
             sync_readers(using="postgres")
         sync.assert_called_once()
-        assert sync.call_args.args[0] is sql_reader
+        assert sync.call_args.args[0] is sql_postgres_reader
 
     def test_reports_missing(self):
         stdout = io.StringIO()
@@ -1061,7 +1070,7 @@ class SyncReadersTests(SimpleTestCase):
 
 class SQLiteServerTests(ServerTestCase, TransactionTestCase):
     # Queries run on a fresh connection, which sees only committed data.
-    url = "/sqlite-mcp"
+    url = "/sql-sqlite-mcp"
 
     def setUp(self):
         Widget.objects.create(name="Sprocket", price="4.50")
@@ -1243,7 +1252,7 @@ class SQLiteServerTests(ServerTestCase, TransactionTestCase):
         ):
             run_query(
                 "SELECT 1",
-                reader=sqlite_reader,
+                reader=sql_sqlite_reader,
                 max_rows=1,
                 max_size=1000,
                 timeout=1,
