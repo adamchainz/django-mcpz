@@ -25,8 +25,8 @@ DATABASES: dict[str, dict[str, Any]] = {
         "NAME": ":memory:",
     },
     "postgres": POSTGRES,
-    # The same test database, as the role created by migration 0002, which
-    # may only read the tests_widget_view view.
+    # The same test database, as the role the django_mcpz.sql app maintains
+    # after migrating, which may only read the tests_widget_view view.
     "reader": {
         **POSTGRES,
         "USER": "mcpz_test_reader",

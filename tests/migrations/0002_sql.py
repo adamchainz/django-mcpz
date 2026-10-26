@@ -5,23 +5,6 @@ from __future__ import annotations
 from django.db import migrations, models
 
 
-def seed_widgets(apps, schema_editor):
-    """
-    Widgets for the reader to query, committed, for it to see. The reader's
-    role and grants are made by the post_migrate handler in tests.apps.
-    """
-    if schema_editor.connection.vendor != "postgresql":
-        return
-    Widget = apps.get_model("tests", "Widget")
-    Widget.objects.using(schema_editor.connection.alias).bulk_create(
-        [
-            Widget(name="Sprocket", price="4.50"),
-            Widget(name="Gizmo", price="12.00", in_stock=False),
-            Widget(name="Doohickey", price="0.99"),
-        ]
-    )
-
-
 class Migration(migrations.Migration):
     dependencies = [
         ("tests", "0001_initial"),
@@ -101,5 +84,4 @@ class Migration(migrations.Migration):
             "CREATE VIEW tests_widget_view AS SELECT id, name, price FROM tests_widget",
             "DROP VIEW tests_widget_view",
         ),
-        migrations.RunPython(seed_widgets, migrations.RunPython.noop, elidable=True),
     ]

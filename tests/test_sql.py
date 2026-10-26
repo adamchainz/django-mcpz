@@ -89,6 +89,16 @@ def resolve(tables):
     return make_reader(tables).tables
 
 
+def create_widgets(using="default"):
+    Widget.objects.using(using).bulk_create(
+        [
+            Widget(name="Sprocket", price="4.50"),
+            Widget(name="Gizmo", price="12.00", in_stock=False),
+            Widget(name="Doohickey", price="0.99"),
+        ]
+    )
+
+
 class AddSQLToolsTests(SimpleTestCase):
     def add(self, **kwargs):
         server = MCPServer(name="s", version="1", auth=public)
@@ -570,6 +580,14 @@ class PostgresServerTests(ServerTestCase, TestCase):
     url = "/sql-postgres-mcp"
     databases = {"postgres", "reader"}
 
+    @classmethod
+    def setUpClass(cls):
+        # The reader alias sees only committed data, so create it before
+        # TestCase opens its transactions.
+        create_widgets(using="postgres")
+        cls.addClassCleanup(Widget.objects.using("postgres").all().delete)
+        super().setUpClass()
+
     def call(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
         response = self.post(
             make_message("tools/call", {"name": name, "arguments": arguments or {}})
@@ -830,6 +848,10 @@ class RunQueryTransactionTests(TransactionTestCase):
         cls.widget_reader = make_reader({Widget: ["id", "name"]})
         super().setUpClass()
 
+    def setUp(self):
+        create_widgets(using="postgres")
+        self.addCleanup(Widget.objects.using("postgres").all().delete)
+
     def test_read_write(self):
         with pytest.raises(ToolError) as excinfo:
             run_query(
@@ -1073,9 +1095,7 @@ class SQLiteServerTests(ServerTestCase, TransactionTestCase):
     url = "/sql-sqlite-mcp"
 
     def setUp(self):
-        Widget.objects.create(name="Sprocket", price="4.50")
-        Widget.objects.create(name="Gizmo", price="12.00", in_stock=False)
-        Widget.objects.create(name="Doohickey", price="0.99")
+        create_widgets()
 
     def call(self, name, arguments=None):
         response = self.post(
