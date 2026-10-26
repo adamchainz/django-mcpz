@@ -10,6 +10,10 @@ Unreleased
 
   `PR #38 <https://github.com/adamchainz/django-mcpz/pull/38>`__.
 
+* Add the ``django_mcpz.sql`` app, whose ``add_sql_tools()`` adds tools letting an LLM run read-only SQL queries against chosen columns of tables and views, plus describe them, on PostgreSQL or SQLite.
+  A ``SQLReader``, defined alongside the tools, lists those columns, and the app maintains the database role the queries run as to match, after every ``migrate``.
+  See :doc:`sql`.
+
 1.2.0 (2026-10-26)
 ------------------
 

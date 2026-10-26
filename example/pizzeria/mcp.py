@@ -22,7 +22,9 @@ from django_mcpz.server import (
     elicit,
     public,
 )
-from pizzeria.models import Order, Pizza
+from django_mcpz.sql.readers import SQLReader
+from django_mcpz.sql.tools import add_sql_tools
+from pizzeria.models import MenuItem, Order, OrderLine, Pizza
 
 server = MCPServer(
     name="mcpizza",
@@ -148,6 +150,7 @@ def place_order(request: HttpRequest, params: PlaceOrderParams) -> dict[str, Any
         quantity=params.quantity,
         requests=params.requests,
         total=pizza.price * params.quantity,
+        channel="mcp",
     )
     return {
         "order_id": order.id,
@@ -296,3 +299,35 @@ def menu_link(request: HttpRequest, params: MenuLinkParams) -> ResourceLink:
         name=f"MCPizza menu for {on_date.isoformat()}",
         mime_type="text/html",
     )
+
+
+# Ad hoc reporting over the read-only views, for questions the other tools
+# don't answer, like "which pizza sold best last month?" Only these columns
+# can be read, checked as each query runs: fields not named here stay hidden,
+# even if they are added to the models later.
+reports_reader = SQLReader(
+    tables={
+        MenuItem: [
+            "id",
+            "name",
+            "price",
+            "vegetarian",
+            "available_from",
+            "available_until",
+        ],
+        OrderLine: [
+            "id",
+            "pizza_id",
+            "quantity",
+            "total",
+            "placed_at",
+            "has_requests",
+            "channel",
+        ],
+    },
+)
+add_sql_tools(
+    server,
+    reader=reports_reader,
+    context="MCPizza's sales data. Prices and totals are in pounds (GBP).",
+)

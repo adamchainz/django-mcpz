@@ -22,7 +22,9 @@ from django_mcpz.server import (
     elicit,
     public,
 )
-from tests.models import Widget
+from django_mcpz.sql.readers import SQLReader
+from django_mcpz.sql.tools import add_sql_tools
+from tests.models import Widget, WidgetView
 
 server = MCPServer(
     name="example-server",
@@ -573,3 +575,31 @@ bearer_elicitation_server = MCPServer(
 bearer_elicitation_server.tool(
     description="Ask for confirmation, as the calling user."
 )(confirm_as_user)
+
+
+sql_server = MCPServer(name="sql-server", version="1.0.0", auth=public)
+# The reader alias's role may read these columns, and nothing else.
+sql_reader = SQLReader(
+    using="reader",
+    grantor="postgres",
+    tables={WidgetView: ["id", "name", "price"]},
+)
+add_sql_tools(
+    sql_server,
+    reader=sql_reader,
+    context="Test widgets.",
+    max_rows=2,
+    timeout=1,
+)
+
+
+# On SQLite, the default alias, with no roles: the tools allow reading only
+# these columns as each query runs.
+sqlite_reader = SQLReader(
+    tables={
+        Widget: ["id", "name", "price"],
+        WidgetView: ["id", "name"],
+    },
+)
+sqlite_server = MCPServer(name="sqlite-server", version="1.0.0", auth=public)
+add_sql_tools(sqlite_server, reader=sqlite_reader, max_rows=2, timeout=1)

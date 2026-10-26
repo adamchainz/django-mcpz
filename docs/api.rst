@@ -332,6 +332,77 @@ For typed input schemas, whether annotated or passed explicitly as ``input_schem
   .. |msgspec.Meta| replace:: ``msgspec.Meta``
   __ https://msgspec.dev/constraints
 
+.. _api-sql:
+
+SQL tools
+---------
+
+.. currentmodule:: django_mcpz.sql.tools
+
+As covered in :doc:`sql`.
+
+.. function:: add_sql_tools(server, *, reader, context=None, max_rows=1000, max_size=50000, timeout=10.0, name_prefix="sql", permission=None)
+
+    Add two tools to ``server``: ``<name_prefix>_schema``, listing the reader’s tables, or describing the columns of some, and ``<name_prefix>_query``, running one read-only PostgreSQL query against them.
+
+    :param server:
+        The :class:`~django_mcpz.server.MCPServer` to add the tools to.
+
+    :param reader:
+        The :class:`~django_mcpz.sql.readers.SQLReader` to run queries as, through its database alias, listing the columns it can read.
+        On PostgreSQL, connecting with psycopg 3, the alias logs in as the reader role that the ``django_mcpz.sql`` app maintains.
+
+    :param context:
+        Optional text shown at the top of the table list, for anything that applies across tables.
+
+    :param max_rows:
+        The most rows a query returns.
+        The LLM is told the limit and when it was hit.
+        ``max_size`` usually binds first, except for narrow results.
+
+    :param max_size:
+        Roughly the most bytes of JSON a query returns, so results fit in the LLM’s context.
+        The default, around 15,000 tokens, stays under the 25,000 tokens Claude Code accepts from a tool by default, with room for the LLM to make several queries.
+        Rows beyond it are left out, and long values are shortened to a fair share of it.
+
+    :param timeout:
+        The statement timeout for queries, in seconds.
+        Fetching rows is timed separately, so a call can take up to about twice this, which must fit within your web server’s request timeout, such as Gunicorn’s default of 30 seconds.
+
+    :param name_prefix:
+        The prefix for the tools’ names, for adding sets of tools for several databases to one server.
+
+    :param permission:
+        An optional permission for both tools, as for :meth:`~django_mcpz.server.MCPServer.tool`.
+
+    Raises ``ImproperlyConfigured`` if the ``django_mcpz.sql`` app isn’t installed, or a limit is out of range.
+
+.. currentmodule:: django_mcpz.sql.readers
+
+.. class:: SQLReader(*, tables, using="default", grantor="default")
+
+    What the SQL tools can read, as covered in :doc:`sql`.
+    On PostgreSQL, the reader’s alias logs in as its own role, and after every ``migrate``, the ``django_mcpz.sql`` app makes the role able to ``SELECT`` exactly the listed columns, and nothing else, finding readers by importing each app’s ``mcp`` module.
+    On SQLite, the tools allow reading only the listed columns as each query runs.
+
+    :param tables:
+        The columns the role can read, as a dict of models, for tables or views, to lists of the names of the fields to expose, such as ``{Order: ["id", "pizza_id", "quantity"]}``.
+        Fields can be named by their name or attribute name, and must be columns of the model’s own table.
+        The models’ and fields’ documentation drives the schema tool.
+
+    :param using:
+        The database alias the tools query through, which, on PostgreSQL, logs in as the reader’s role.
+
+    :param grantor:
+        On PostgreSQL, the database alias whose role creates and grants to the reader’s role, after that alias is migrated.
+        Unused on SQLite.
+
+    Raises ``ImproperlyConfigured`` if an alias isn’t in ``DATABASES``, the database isn’t PostgreSQL or SQLite, ``using`` and ``grantor`` are the same on PostgreSQL, ``tables`` names a field that isn’t a column, or another reader for the same alias lists different columns.
+
+    Readers are immutable.
+
+.. currentmodule:: django_mcpz.server
+
 .. _api-logging:
 
 Log records

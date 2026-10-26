@@ -66,5 +66,6 @@ repos:
     - django-stubs==6.1.0
     - httpx2
     - msgspec
+    - psycopg
     - pytest
     - unittest-parametrize
