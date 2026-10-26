@@ -21,6 +21,10 @@ __ https://modelcontextprotocol.io/specification/draft/server/tools#listing-tool
 __ https://modelcontextprotocol.io/specification/draft/server/tools#calling-tools
 
 Define a server by creating an :class:`MCPServer` instance, attaching tool functions with its :meth:`~MCPServer.tool` decorator, and routing the server itself as the view, at whatever URL you like.
+
+Put each server in an ``mcp`` module of one of your apps, alongside its ``models.py`` and ``admin.py``: an ``mcp.py`` file, or an ``mcp`` package for a server with many tools.
+That keeps servers easy to find, and is the convention these docs and the example project follow.
+
 For example, in ``example/mcp.py``:
 
 .. code-block:: python
