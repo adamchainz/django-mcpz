@@ -366,8 +366,8 @@ As covered in :doc:`sql`.
         Rows beyond it are left out, and long values are shortened to a fair share of it.
 
     :param timeout:
-        The statement timeout for queries, in seconds.
-        Fetching rows is timed separately, so a call can take up to about twice this, which must fit within your web server’s request timeout, such as Gunicorn’s default of 30 seconds.
+        The timeout for queries, in seconds, including fetching their rows.
+        It must fit within your web server’s request timeout, such as Gunicorn’s default of 30 seconds.
 
     :param name_prefix:
         The prefix for the tools’ names, for adding sets of tools for several databases to one server.

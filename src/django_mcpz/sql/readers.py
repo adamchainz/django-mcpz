@@ -74,15 +74,11 @@ class SQLReader:
                 raise ImproperlyConfigured(
                     f"SQLReader {name}={alias!r} isn't a database alias in DATABASES."
                 )
-        get_query(connections[using])
-        # On PostgreSQL, the reader logs in as its own role.
-        if connections[using].vendor == "postgresql" and using == grantor:
-            raise ImproperlyConfigured(
-                f"SQLReader needs using, the alias that logs in as the reader"
-                f" role, to differ from grantor, the alias whose role grants it"
-                f" access, but both are {using!r}."
-            )
-        resolved = tuple(_resolve_tables(tables, connections[using]))
+        connection = connections[using]
+        get_query(connection)
+        if connection.vendor == "postgresql":
+            _check_postgresql(connection, grantor)
+        resolved = tuple(_resolve_tables(tables, connection))
         existing = _readers.get(using)
         if existing is not None and (
             existing.grantor != grantor
@@ -105,9 +101,25 @@ class SQLReader:
         raise AttributeError("SQLReader is immutable.")
 
 
-def all_readers() -> list[SQLReader]:
-    """Every reader defined."""
-    return list(_readers.values())
+def _check_postgresql(connection: BaseDatabaseWrapper, grantor: str) -> None:
+    """The reader's alias must log in as its own role, with psycopg 3."""
+    using = connection.alias
+    try:
+        import psycopg  # noqa: F401
+    except ImportError:  # pragma: no cover
+        raise ImproperlyConfigured("The SQL tools need psycopg 3.") from None
+    if using == grantor:
+        raise ImproperlyConfigured(
+            f"SQLReader needs using, the alias that logs in as the reader"
+            f" role, to differ from grantor, the alias whose role grants it"
+            f" access, but both are {using!r}."
+        )
+    if connection.settings_dict["OPTIONS"].get("assume_role"):
+        raise ImproperlyConfigured(
+            f"SQLReader needs using={using!r} to log in as the reader role, not"
+            " use assume_role, since queries could switch back to the login"
+            " role with set_config('role', ...)."
+        )
 
 
 def _resolve_tables(tables: Any, connection: BaseDatabaseWrapper) -> list[Table]:

@@ -27,7 +27,7 @@ from django_mcpz.server import MCPServer, ToolError, public
 from django_mcpz.sql import readers as readers_module
 from django_mcpz.sql.grants import sync_grants, sync_readers
 from django_mcpz.sql.queries import _release_advisory_locks, _watchdog, get_query
-from django_mcpz.sql.readers import SQLReader, all_readers
+from django_mcpz.sql.readers import SQLReader
 from django_mcpz.sql.tools import (
     _fetch,
     _rough_size,
@@ -88,10 +88,6 @@ def make_reader(tables, using="reader", grantor="postgres"):
         return SQLReader(tables=tables, using=using, grantor=grantor)
 
 
-def resolve(tables):
-    return make_reader(tables).tables
-
-
 def create_widgets(using="default"):
     Widget.objects.using(using).bulk_create(
         [
@@ -138,14 +134,6 @@ class AddSQLToolsTests(SimpleTestCase):
     def test_timeout(self):
         assert self.error(timeout=0) == "timeout must be positive."
 
-    def test_assume_role(self):
-        with mock.patch.dict(
-            connections["reader"].settings_dict["OPTIONS"], {"assume_role": "x"}
-        ):
-            assert self.error().startswith(
-                "add_sql_tools() needs 'reader' to log in as the reader role,"
-            )
-
     def test_name_prefix_and_permission(self):
         server = self.add(name_prefix="widgets", permission=lambda request: False)
         assert list(server._tools) == ["widgets_schema", "widgets_query"]
@@ -176,14 +164,14 @@ class SQLReaderTests(SimpleTestCase):
             del sql_postgres_reader.using
 
     def test_registered(self):
-        assert sql_postgres_reader in all_readers()
+        assert readers_module._readers["reader"] is sql_postgres_reader
 
     def test_same_again(self):
         # A second, identical definition is fine, and replaces the first.
         with isolated():
             SQLReader(tables=WIDGET_VIEW, using="reader", grantor="postgres")
             second = SQLReader(tables=WIDGET_VIEW, using="reader", grantor="postgres")
-            assert all_readers() == [second]
+            assert list(readers_module._readers.values()) == [second]
 
     def test_conflict_tables(self):
         with pytest.raises(ImproperlyConfigured) as excinfo:
@@ -217,6 +205,14 @@ class SQLReaderTests(SimpleTestCase):
             " to differ from grantor, the alias whose role grants it access,"
             " but both are 'postgres'."
         )
+
+    def test_assume_role(self):
+        with mock.patch.dict(
+            connections["reader"].settings_dict["OPTIONS"], {"assume_role": "x"}
+        ):
+            assert self.error().startswith(
+                "SQLReader needs using='reader' to log in as the reader role,"
+            )
 
     def test_sqlite_defaults(self):
         # SQLite has no roles, so the defaults, both "default", are fine.
@@ -283,24 +279,17 @@ class SQLReaderTests(SimpleTestCase):
 class ListTablesTests(SimpleTestCase):
     @override_settings(USE_TZ=False, TIME_ZONE="Europe/London")
     def test_sqlite_local_time(self):
-        assert list_tables(resolve({Widget: ["id"]}), using="default").startswith(
+        reader = make_reader({Widget: ["id"]}, using="default", grantor="default")
+        assert list_tables(reader).startswith(
             "Dates and times are stored as ISO 8601 text, in the time zone"
             " Europe/London, so use SQLite's date and time functions on them.\n"
         )
 
     def test_tables(self):
-        assert list_tables(
-            resolve(
-                {
-                    WidgetView: ["id"],
-                    Undocumented: ["id"],
-                    Reserved: ["id"],
-                    Part: ["id"],
-                }
-            ),
-            using="reader",
-            schema_tool="widgets_schema",
-        ) == (
+        reader = make_reader(
+            {WidgetView: ["id"], Undocumented: ["id"], Reserved: ["id"], Part: ["id"]}
+        )
+        assert list_tables(reader, schema_tool="widgets_schema") == (
             "Queries run with the time zone UTC, which applies to date"
             " functions on timestamp with time zone columns.\n"
             "\n"
@@ -315,8 +304,9 @@ class ListTablesTests(SimpleTestCase):
 
 
 class DescribeTablesTests(SimpleTestCase):
-    def describe(self, tables, **kwargs):
-        return describe_tables(resolve(tables), using="reader", **kwargs)
+    def describe(self, tables):
+        reader = make_reader(tables)
+        return describe_tables(reader, reader.tables)
 
     def test_view(self):
         assert self.describe(WIDGET_VIEW) == SCHEMA
@@ -332,10 +322,8 @@ class DescribeTablesTests(SimpleTestCase):
 
     def test_all_tables(self):
         # References to tables outside the described ones, but queryable.
-        all_tables = resolve({**WIDGET_VIEW, **PART})
-        assert describe_tables(
-            all_tables[1:], using="reader", all_tables=all_tables
-        ).splitlines()[4] == (
+        reader = make_reader({**WIDGET_VIEW, **PART})
+        assert describe_tables(reader, reader.tables[1:]).splitlines()[4] == (
             "  widget_id bigint NOT NULL REFERENCES tests_widget_view (id),"
         )
 
@@ -377,7 +365,8 @@ class DescribeTablesTests(SimpleTestCase):
 
 class DescribeEdgeCasesTests(SimpleTestCase):
     def describe(self, tables):
-        return describe_tables(resolve(tables), using="reader")
+        reader = make_reader(tables)
+        return describe_tables(reader, reader.tables)
 
     def test_quoting(self):
         assert self.describe({Reserved: ["id", "user", "label"]}) == (
@@ -597,28 +586,23 @@ class FetchTests(SimpleTestCase):
 
     def test_size(self):
         cursor = self.cursor([("x" * 300,)] * 30)
-        rows, more = _fetch(cursor, max_rows=100, max_size=1000, deadline=1e12)
+        rows, more = _fetch(cursor, max_rows=100, max_size=1000)
         # One row, then two more, which fit, then one, over the limit.
         assert (len(rows), more) == (4, True)
 
     def test_huge_first_row(self):
         cursor = self.cursor([("x" * 2000,)] * 30)
-        rows, more = _fetch(cursor, max_rows=100, max_size=1000, deadline=1e12)
-        assert (len(rows), more) == (1, True)
-
-    def test_deadline(self):
-        cursor = self.cursor([(1,)] * 30)
-        rows, more = _fetch(cursor, max_rows=100, max_size=1000, deadline=0)
+        rows, more = _fetch(cursor, max_rows=100, max_size=1000)
         assert (len(rows), more) == (1, True)
 
     def test_exact(self):
         cursor = self.cursor([(1,)] * 10)
-        rows, more = _fetch(cursor, max_rows=100, max_size=1000, deadline=1e12)
+        rows, more = _fetch(cursor, max_rows=100, max_size=1000)
         assert (len(rows), more) == (10, False)
 
     def test_huge_array(self):
         cursor = self.cursor([(["x" * 300, {"k": "x" * 300}],)] * 30)
-        rows, more = _fetch(cursor, max_rows=100, max_size=1000, deadline=1e12)
+        rows, more = _fetch(cursor, max_rows=100, max_size=1000)
         assert (len(rows), more) == (2, True)
 
     def test_rough_size(self):

@@ -12,7 +12,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.db import connections, transaction
 from django.utils.module_loading import autodiscover_modules
 
-from django_mcpz.sql.readers import SQLReader, all_readers, quote_name
+from django_mcpz.sql.readers import SQLReader, _readers, quote_name
 
 
 def sync_readers(
@@ -25,7 +25,7 @@ def sync_readers(
     # Readers are defined alongside the tools that use them, in apps' mcp
     # modules, so import those first, as the admin does for admin modules.
     autodiscover_modules("mcp")
-    for reader in all_readers():
+    for reader in _readers.values():
         # SQLite readers have no role, being checked as each query runs.
         if reader.grantor == using and connections[reader.using].vendor == "postgresql":
             missing = sync_grants(reader)

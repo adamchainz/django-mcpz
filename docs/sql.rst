@@ -57,7 +57,7 @@ The setup takes four steps: installing the app, a database alias for the role, a
        }
 
    The alias must log in as its own role.
-   Django’s ``assume_role`` option won’t do, since queries could switch back to the login role, so :func:`add_sql_tools` rejects it.
+   Django’s ``assume_role`` option won’t do, since queries could switch back to the login role, so :class:`~django_mcpz.sql.readers.SQLReader` rejects it.
 
    If you use a `database router <https://docs.djangoproject.com/en/stable/topics/db/multi-db/#database-routers>`__, make sure it doesn’t send migrations to this alias.
 
@@ -257,7 +257,7 @@ The tools add more limits on top:
 * A watchdog thread cancels the query once the timeout has passed, including fetching its rows.
   A ``statement_timeout`` also stops each statement that runs too long, but the query could turn it off with ``set_config()``, which the watchdog doesn’t depend on.
 
-* Rows are fetched from the cursor in batches, stopping at ``max_rows``, once values totalling ``max_size`` have arrived, or once the timeout has passed.
+* Rows are fetched from the cursor in batches, stopping at ``max_rows``, or once values totalling ``max_size`` have arrived.
   The first batch is a single row, and later ones are sized to fit what remains of ``max_size``, so a query for millions of rows, or for huge values, transfers only the first few.
 
 * Session-level advisory locks, taken with functions like ``pg_advisory_lock()``, are released after each query, as they survive the rollback.

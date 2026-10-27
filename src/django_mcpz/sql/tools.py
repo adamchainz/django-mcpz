@@ -6,7 +6,6 @@ of tables and views of an SQLReader.
 from __future__ import annotations
 
 import math
-import time
 from collections.abc import Callable, Sequence
 from decimal import Decimal
 from typing import Annotated, Any
@@ -84,20 +83,7 @@ def add_sql_tools(
             "add_sql_tools() needs 'django_mcpz.sql' in INSTALLED_APPS, to"
             " maintain the reader role's grants."
         )
-    using = reader.using
-    connection = connections[using]
-    get_query(connection)
-    if connection.vendor == "postgresql":
-        try:
-            import psycopg  # noqa: F401
-        except ImportError:  # pragma: no cover
-            raise ImproperlyConfigured("The SQL tools need psycopg 3.") from None
-        if connection.settings_dict["OPTIONS"].get("assume_role"):
-            raise ImproperlyConfigured(
-                f"add_sql_tools() needs {using!r} to log in as the reader role,"
-                " not use assume_role, since queries could switch back to the"
-                " login role with set_config('role', ...)."
-            )
+    connection = connections[reader.using]
     if max_rows < 1:
         raise ImproperlyConfigured("max_rows must be at least 1.")
     if max_size < 1000:
@@ -123,9 +109,7 @@ def add_sql_tools(
     )
     def sql_schema(request: HttpRequest, params: SQLSchemaParams) -> str:
         if not params.tables:
-            return list_tables(
-                reader.tables, using=using, context=context, schema_tool=schema_name
-            )
+            return list_tables(reader, context=context, schema_tool=schema_name)
         by_name = {table.name: table for table in reader.tables}
         # Accept names as the model would write them in SQL, quoted or not.
         names = [name.strip().strip('"').replace('""', '"') for name in params.tables]
@@ -136,11 +120,7 @@ def add_sql_tools(
                 " Available tables:"
                 f" {', '.join(quote_name(n) for n in by_name)}."
             )
-        return describe_tables(
-            [by_name[name] for name in dict.fromkeys(names)],
-            using=using,
-            all_tables=reader.tables,
-        )
+        return describe_tables(reader, [by_name[name] for name in dict.fromkeys(names)])
 
     @server.tool(
         name=query_name,
@@ -179,24 +159,23 @@ def run_query(
     savepoint, that is always rolled back, made read-only by the database's
     query context manager.
 
-    Rows are fetched in batches, stopping at max_rows, once roughly max_size
-    bytes of values have arrived, or once the timeout has passed, since on
-    PostgreSQL, each FETCH gets its own statement timeout.
+    Rows are fetched in batches, stopping at max_rows, or once roughly
+    max_size bytes of values have arrived. The query context manager times
+    out the whole query, fetching included.
     """
     connection = connections[reader.using]
     query = get_query(connection)
     sql = sql.strip().rstrip(";").rstrip()
     if not sql:
         raise ToolError("The SQL is empty.")
-    deadline = time.monotonic() + timeout
     with query(connection, reader, sql, timeout) as cursor:
         columns = [column[0] for column in cursor.description]
-        rows, more = _fetch(cursor, max_rows, max_size, deadline)
+        rows, more = _fetch(cursor, max_rows, max_size)
     return columns, rows, more
 
 
 def _fetch(
-    cursor: CursorWrapper, max_rows: int, max_size: int, deadline: float
+    cursor: CursorWrapper, max_rows: int, max_size: int
 ) -> tuple[list[tuple[Any, ...]], bool]:
     rows: list[tuple[Any, ...]] = []
     size = 0
@@ -209,7 +188,7 @@ def _fetch(
         if not batch:
             return rows, False
         size += sum(_rough_size(value) for row in batch for value in row)
-        if size > max_size or time.monotonic() > deadline:
+        if size > max_size:
             # Probably more, which would cost a FETCH to find out.
             return rows, True
         # As many rows as probably fit in what's left of max_size.
@@ -321,18 +300,14 @@ def _shorten(value: Any, max_value: int) -> tuple[Any, bool]:
 
 
 def list_tables(
-    table_list: Sequence[Table],
-    *,
-    using: str,
-    context: str | None = None,
-    schema_tool: str = "sql_schema",
+    reader: SQLReader, *, context: str | None = None, schema_tool: str = "sql_schema"
 ) -> str:
     """
-    List the tables, each with its description, from the model's
+    List the reader's tables, each with its description, from the model's
     db_table_comment or docstring, plus the context and anything else that
     applies to every query.
     """
-    connection = connections[using]
+    connection = connections[reader.using]
     parts = []
     if context:
         parts.append(context.strip())
@@ -350,7 +325,7 @@ def list_tables(
             " applies to date functions on timestamp with time zone columns."
         )
     lines = ["Tables:"]
-    for table in table_list:
+    for table in reader.tables:
         line = f"- {quote_name(table.name)}"
         description = _table_description(table.model)
         if description:
@@ -361,21 +336,16 @@ def list_tables(
     return "\n\n".join(parts) + "\n"
 
 
-def describe_tables(
-    table_list: Sequence[Table],
-    *,
-    using: str,
-    all_tables: Sequence[Table] | None = None,
-) -> str:
+def describe_tables(reader: SQLReader, tables: Sequence[Table]) -> str:
     """
-    Describe the tables as CREATE TABLE statements, with comments from each
-    model's db_table_comment or docstring, and each field's db_comment or
-    help_text, verbose name, and choices. Foreign keys to exposed columns of
-    all_tables, by default the same tables, get REFERENCES.
+    Describe some of the reader's tables as CREATE TABLE statements, with
+    comments from each model's db_table_comment or docstring, and each
+    field's db_comment or help_text, verbose name, and choices. Foreign keys
+    to exposed columns of any of the reader's tables get REFERENCES.
     """
-    connection = connections[using]
-    exposed = {table.name: set(table.columns) for table in (all_tables or table_list)}
-    parts = [_describe_table(table, connection, exposed) for table in table_list]
+    connection = connections[reader.using]
+    exposed = {table.name: set(table.columns) for table in reader.tables}
+    parts = [_describe_table(table, connection, exposed) for table in tables]
     return "\n\n".join(parts) + "\n"
 
 
