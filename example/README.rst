@@ -8,10 +8,11 @@ Each ``Pizza`` has structured fields the server can filter and enforce, such as 
 
 The important code lives in these files:
 
-* ``pizzeria/models.py``: the models.
-* ``pizzeria/migrations/0002_menu.py``: the migration that seeds data.
+* ``pizzeria/models.py``: the models, including unmanaged ones for the report views.
+* ``pizzeria/migrations/0001_initial.py``: the migration that creates the tables, and the report views for the SQL tools.
+* ``pizzeria/migrations/0002_data.py``: the migration that seeds the menu and three months of orders.
   Specials are dated relative to the day you run the migrations.
-* ``pizzeria/mcp.py``: the MCP server and tools, in the app’s ``mcp`` module, following the `django-mcpz convention <https://django-mcpz.readthedocs.io/en/latest/servers.html>`__.
+* ``pizzeria/mcp.py``: the MCP server and tools, in the app’s ``mcp`` module, following the `django-mcpz convention <https://django-mcpz.readthedocs.io/en/latest/servers.html>`__, plus the ``SQLReader`` listing the columns the SQL tools can read.
 * ``pizzeria/views.py`` and ``pizzeria/templates/pizzeria/menu.html``: the menu web page that the ``menu_link`` tool points at.
 * ``pizzeria/static/pizzeria/icon.svg``: the server’s icon, which clients show alongside its title.
 
@@ -33,6 +34,9 @@ The included tools are:
 
 * ``menu_link``: a link to the menu web page for a date, past or future, for the user to open in a browser.
 
+* ``sql_schema`` and ``sql_query``: ad hoc reporting with SQL, over read-only views of the menu and three months of orders, with `the SQL tools <https://django-mcpz.readthedocs.io/en/latest/sql.html>`__.
+  They check each query’s reads as it runs, allowing only the columns listed by the ``SQLReader`` in ``pizzeria/mcp.py``.
+
 Setup
 -----
 
@@ -44,7 +48,7 @@ In this directory, run:
     uv run --group example manage.py runserver
 
 The ``example`` dependency group adds Pillow, for the chart.
-Migrating creates an SQLite database, the ``db.sqlite3`` file in this directory, seeded with the menu.
+Migrating creates an SQLite database, the ``db.sqlite3`` file in this directory, seeded with the menu and three months of orders.
 To start afresh, delete it and migrate again.
 
 The ``runserver`` should launch the MCP server at http://127.0.0.1:8066/mcp, with the menu web page at http://127.0.0.1:8066/menu/2026-01-01/ for any date.
@@ -206,6 +210,45 @@ Example output:
 .. code-block:: text
 
     Here's tomorrow's menu (2026-09-12): http://127.0.0.1:8066/menu/2026-09-12/
+
+Test the SQL tools with ``claude``
+----------------------------------
+
+With the server running, ask a question the other tools can’t answer:
+
+.. code-block:: sh
+
+    claude --mcp-config mcp.json --strict-mcp-config --allowedTools "mcp__mcpizza__*" \
+      -p "How has the share of orders coming from AI assistants changed month by month? Give me a small table."
+
+Example output, after the model called ``sql_schema`` to list the tables, then again for their columns, then ``sql_query`` once:
+
+.. code-block:: text
+
+    Share of orders placed via an AI assistant (the `mcp` channel):
+
+    | Month | Total orders | AI orders | AI share |
+    |---|---|---|---|
+    | Jul 2026 | 45 | 6 | 13.3% |
+    | Aug 2026 | 484 | 83 | 17.1% |
+    | Sep 2026 | 434 | 111 | 25.6% |
+    | Oct 2026 | 357 | 126 | 35.3% |
+
+    The AI share has risen every month. AI order counts have grown while total orders have fallen since August.
+
+    Two caveats:
+    - July looks like a partial month, with only 45 orders, so its 13.3% rests on a small sample.
+    - October is still in progress, since today is the 26th.
+
+The query it wrote:
+
+.. code-block:: sql
+
+    SELECT strftime('%Y-%m', placed_at) m, COUNT(*) orders, SUM(channel='mcp') mcp,
+      ROUND(100.0*SUM(channel='mcp')/COUNT(*),1) pct
+    FROM pizzeria_report_order_line GROUP BY m ORDER BY m
+
+Ask about the customers’ requests, and the model can only say how many orders had them, since the view leaves out their text.
 
 Talking to it from Python
 -------------------------

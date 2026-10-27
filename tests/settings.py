@@ -6,22 +6,31 @@ SECRET_KEY = "NOTASECRET"
 
 ALLOWED_HOSTS: list[str] = []
 
+# PostgreSQL is used only by the tests that need it. It matches compose.yaml,
+# so start it with: docker compose up -d --wait
+POSTGRES: dict[str, Any] = {
+    "ENGINE": "django.db.backends.postgresql",
+    "NAME": "mcpz",
+    "HOST": "localhost",
+    "PORT": "55432",
+    "USER": "postgres",
+    "PASSWORD": "postgres",
+    # Set up without the default database, for tests that use only these.
+    "TEST": {"DEPENDENCIES": []},
+}
+
 DATABASES: dict[str, dict[str, Any]] = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": ":memory:",
     },
-    # PostgreSQL is used only by the tests that need it. It matches
-    # compose.yaml, so start it with: docker compose up -d --wait
-    "postgres": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": "mcpz",
-        "HOST": "localhost",
-        "PORT": "55432",
-        "USER": "postgres",
-        "PASSWORD": "postgres",
-        # Set up without the default database, for tests that use only this.
-        "TEST": {"DEPENDENCIES": []},
+    "postgres": POSTGRES,
+    # The same test database, as the role the django_mcpz.sql app maintains
+    # after migrating, which may only read the tests_widget_view view.
+    "reader": {
+        **POSTGRES,
+        "USER": "mcpz_test_reader",
+        "PASSWORD": "mcpz_test_reader",
     },
 }
 
@@ -34,6 +43,7 @@ INSTALLED_APPS = [
     "django_mcpz",
     "django_mcpz.oauth",
     "django_mcpz.bearer_tokens",
+    "django_mcpz.sql",
     "tests",
 ]
 
@@ -63,3 +73,8 @@ ROOT_URLCONF = "tests.urls"
 
 USE_TZ = True
 STATIC_URL = "static/"
+
+SILENCED_SYSTEM_CHECKS = [
+    # “SQLite does not support comments on tables”
+    "models.W046",
+]
