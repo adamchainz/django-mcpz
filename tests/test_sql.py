@@ -26,7 +26,12 @@ from django.test import (
 from django_mcpz.server import MCPServer, ToolError, public
 from django_mcpz.sql import readers as readers_module
 from django_mcpz.sql.grants import sync_grants, sync_readers
-from django_mcpz.sql.queries import _release_advisory_locks, _watchdog, get_query
+from django_mcpz.sql.queries import (
+    _release_advisory_locks,
+    _sqlite_close,
+    _watchdog,
+    get_query,
+)
 from django_mcpz.sql.readers import SQLReader
 from django_mcpz.sql.tools import (
     _fetch,
@@ -1416,6 +1421,33 @@ class SQLiteServerTests(ServerTestCase, TransactionTestCase):
             "The SQL tools can't query the database alias 'default', a private"
             " in-memory SQLite database, which only its own connection can open."
         )
+
+    def test_schema_copy_fallback(self):
+        # The copy can't recreate a table using a collation only the app's
+        # connection has, so makes it a table of its columns instead.
+        connection = connections["default"]
+        connection.ensure_connection()
+        connection.connection.create_collation("backwards", lambda a, b: 0)
+        with connection.cursor() as cursor:
+            cursor.execute("CREATE TABLE tests_collated (name TEXT COLLATE backwards)")
+        self.addCleanup(self.drop_collated)
+        assert self.query("SELECT count(*) AS n FROM tests_widget") == {
+            "columns": ["n"],
+            "rows": [[3]],
+        }
+        assert self.query("SELECT name FROM tests_collated") == (
+            "Query error: access to tests_collated.name is prohibited"
+        )
+
+    def drop_collated(self):
+        with connections["default"].cursor() as cursor:
+            cursor.execute("DROP TABLE tests_collated")
+
+    def test_close_unconnected(self):
+        # Closing a connection that never connected, after failing to.
+        connection = connections.create_connection("default")
+        _sqlite_close(connection)
+        assert connection.connection is None
 
 
 class SQLiteErrorTests(SimpleTestCase):
