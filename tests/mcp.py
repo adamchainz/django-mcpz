@@ -578,13 +578,9 @@ bearer_elicitation_server.tool(
 
 
 # On PostgreSQL, the reader alias, whose role may read only these columns.
-def can_view_all(request, model):
-    return True
-
-
+# On PostgreSQL.
 sql_postgres_reader = SQLReader(
-    using="reader",
-    grantor="postgres",
+    using="postgres",
     tables={WidgetView: ["id", "name", "price"]},
 )
 sql_postgres_server = MCPServer(
@@ -596,12 +592,10 @@ add_sql_tools(
     context="Test widgets.",
     max_rows=2,
     timeout=1,
-    can_view=can_view_all,
 )
 
 
-# On SQLite, the default alias, with no roles: the tools allow reading only
-# these columns as each query runs.
+# On SQLite, the default alias.
 sql_sqlite_reader = SQLReader(
     tables={
         Widget: ["id", "name", "price"],
@@ -609,17 +603,18 @@ sql_sqlite_reader = SQLReader(
     },
 )
 sql_sqlite_server = MCPServer(name="sql-sqlite-server", version="1.0.0", auth=public)
-add_sql_tools(
-    sql_sqlite_server,
-    reader=sql_sqlite_reader,
-    max_rows=2,
-    timeout=1,
-    can_view=can_view_all,
-)
+add_sql_tools(sql_sqlite_server, reader=sql_sqlite_reader, max_rows=2, timeout=1)
 
-# The same reader, with each user seeing the tables they have the view
-# permission for, by default.
+# The same tables, with each user seeing those they have the view permission
+# for.
+sql_permissions_reader = SQLReader(
+    tables={
+        Widget: ["id", "name", "price"],
+        WidgetView: ["id", "name"],
+    },
+    view_permissions=True,
+)
 sql_permissions_server = MCPServer(
     name="sql-permissions-server", version="1.0.0", auth=public
 )
-add_sql_tools(sql_permissions_server, reader=sql_sqlite_reader)
+add_sql_tools(sql_permissions_server, reader=sql_permissions_reader)

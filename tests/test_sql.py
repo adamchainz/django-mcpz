@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import io
 import ipaddress
 import time
 import uuid
@@ -19,15 +18,11 @@ from django.test import (
     SimpleTestCase,
     TestCase,
     TransactionTestCase,
-    modify_settings,
     override_settings,
 )
 
-from django_mcpz.server import MCPServer, ToolError, public
-from django_mcpz.sql import readers as readers_module
-from django_mcpz.sql.grants import sync_grants, sync_readers
+from django_mcpz.server import MCPServer, public
 from django_mcpz.sql.queries import (
-    _release_advisory_locks,
     _sqlite_close,
     _watchdog,
     get_query,
@@ -51,7 +46,6 @@ from tests.models import (
     Reserved,
     Undocumented,
     Widget,
-    WidgetLater,
     WidgetProxy,
     WidgetView,
 )
@@ -83,18 +77,12 @@ PART: dict[type[Model], list[str]] = {
 }
 
 
-def isolated():
-    """An empty registry of readers, restored afterwards."""
-    return mock.patch.dict(readers_module._readers, clear=True)
+def make_reader(tables, using="postgres", **kwargs):
+    return SQLReader(tables=tables, using=using, **kwargs)
 
 
-def make_reader(tables, using="reader", grantor="postgres"):
-    with isolated():
-        return SQLReader(tables=tables, using=using, grantor=grantor)
-
-
-# For tests of the database's own limits, which hold even for queries the
-# checker would reject.
+# For tests of the database's own limits, on what queries can do beyond
+# reading, which hold even for queries the checker would reject.
 skip_check = mock.patch(
     "django_mcpz.sql.tools.check_query", new=lambda sql, **kwargs: sql
 )
@@ -120,13 +108,6 @@ class AddSQLToolsTests(SimpleTestCase):
         with pytest.raises(ImproperlyConfigured) as excinfo:
             self.add(**kwargs)
         return str(excinfo.value)
-
-    @modify_settings(INSTALLED_APPS={"remove": "django_mcpz.sql"})
-    def test_app_not_installed(self):
-        assert self.error() == (
-            "add_sql_tools() needs 'django_mcpz.sql' in INSTALLED_APPS, to"
-            " maintain the reader role's grants."
-        )
 
     def test_unsupported_database(self):
         connection = mock.Mock(vendor="mysql", display_name="MySQL", alias="mysql")
@@ -159,10 +140,8 @@ class SQLReaderTests(SimpleTestCase):
         return str(excinfo.value)
 
     def test_reader(self):
-        assert (sql_postgres_reader.using, sql_postgres_reader.grantor) == (
-            "reader",
-            "postgres",
-        )
+        assert sql_postgres_reader.using == "postgres"
+        assert sql_postgres_reader.view_permissions is False
         assert [table.name for table in sql_postgres_reader.tables] == [
             "tests_widget_view"
         ]
@@ -175,62 +154,14 @@ class SQLReaderTests(SimpleTestCase):
         with pytest.raises(AttributeError):
             del sql_postgres_reader.using
 
-    def test_registered(self):
-        assert readers_module._readers["reader"] is sql_postgres_reader
-
-    def test_same_again(self):
-        # A second, identical definition is fine, and replaces the first.
-        with isolated():
-            SQLReader(tables=WIDGET_VIEW, using="reader", grantor="postgres")
-            second = SQLReader(tables=WIDGET_VIEW, using="reader", grantor="postgres")
-            assert list(readers_module._readers.values()) == [second]
-
-    def test_conflict_tables(self):
-        with pytest.raises(ImproperlyConfigured) as excinfo:
-            SQLReader(tables={WidgetView: ["id"]}, using="reader", grantor="postgres")
-        assert str(excinfo.value) == (
-            "Two SQLReaders for 'reader' differ, but its role can have only one"
-            " set of grants. Define it once and share it."
-        )
-
-    def test_conflict_grantor(self):
-        with pytest.raises(ImproperlyConfigured) as excinfo:
-            SQLReader(tables=WIDGET_VIEW, using="reader", grantor="default")
-        assert str(excinfo.value).startswith("Two SQLReaders for 'reader' differ,")
-
     def test_using_unknown(self):
         assert self.error(using="nope") == (
             "SQLReader using='nope' isn't a database alias in DATABASES."
         )
 
-    def test_grantor_unknown(self):
-        assert self.error(grantor="nope") == (
-            "SQLReader grantor='nope' isn't a database alias in DATABASES."
-        )
-
-    def test_using_is_grantor(self):
-        # On PostgreSQL, the reader logs in as its own role.
-        with pytest.raises(ImproperlyConfigured) as excinfo:
-            make_reader(WIDGET_VIEW, using="postgres", grantor="postgres")
-        assert str(excinfo.value) == (
-            "SQLReader needs using, the alias that logs in as the reader role,"
-            " to differ from grantor, the alias whose role grants it access,"
-            " but both are 'postgres'."
-        )
-
-    def test_assume_role(self):
-        with mock.patch.dict(
-            connections["reader"].settings_dict["OPTIONS"], {"assume_role": "x"}
-        ):
-            assert self.error().startswith(
-                "SQLReader needs using='reader' to log in as the reader role,"
-            )
-
-    def test_sqlite_defaults(self):
-        # SQLite has no roles, so the defaults, both "default", are fine.
-        with isolated():
-            reader = SQLReader(tables={Widget: ["id"]})
-        assert (reader.using, reader.grantor) == ("default", "default")
+    def test_defaults(self):
+        reader = SQLReader(tables={Widget: ["id"]})
+        assert (reader.using, reader.view_permissions) == ("default", False)
 
     def test_no_tables(self):
         assert self.error({}) == (
@@ -291,7 +222,7 @@ class SQLReaderTests(SimpleTestCase):
 class ListTablesTests(SimpleTestCase):
     @override_settings(USE_TZ=False, TIME_ZONE="Europe/London")
     def test_sqlite_local_time(self):
-        reader = make_reader({Widget: ["id"]}, using="default", grantor="default")
+        reader = make_reader({Widget: ["id"]}, using="default")
         assert list_tables(reader, reader.tables).startswith(
             "Dates and times are stored as ISO 8601 text, in the time zone"
             " Europe/London, so use SQLite's date and time functions on them.\n"
@@ -535,27 +466,6 @@ class EncodeResultTests(SimpleTestCase):
         assert result["note"].startswith("Only the first 1 rows are shown.")
 
 
-class ReleaseAdvisoryLocksTests(SimpleTestCase):
-    def test_not_connected(self):
-        _release_advisory_locks(mock.Mock(connection=None))
-
-    def test_closed(self):
-        _release_advisory_locks(mock.Mock(connection=mock.Mock(closed=True)))
-
-    def test_needs_rollback(self):
-        pg_connection = mock.Mock(closed=False)
-        connection = mock.Mock(connection=pg_connection, needs_rollback=True)
-        _release_advisory_locks(connection)
-        connection.cursor.assert_not_called()
-
-    def test_failed_transaction(self):
-        pg_connection = mock.Mock(closed=False)
-        pg_connection.info.transaction_status = psycopg.pq.TransactionStatus.INERROR
-        connection = mock.Mock(connection=pg_connection, needs_rollback=False)
-        _release_advisory_locks(connection)
-        connection.cursor.assert_not_called()
-
-
 class WatchdogTests(SimpleTestCase):
     def test_cancels(self):
         pg_connection = mock.Mock(spec=["cancel_safe"])
@@ -626,7 +536,7 @@ class FetchTests(SimpleTestCase):
 @skip_check
 class PostgresServerTests(ServerTestCase, TestCase):
     url = "/sql-postgres-mcp"
-    databases = {"postgres", "reader"}
+    databases = {"postgres"}
 
     @classmethod
     def setUpClass(cls):
@@ -732,19 +642,12 @@ class PostgresServerTests(ServerTestCase, TestCase):
     def test_empty(self):
         assert self.query(" ; ") == "The SQL is empty."
 
-    def test_permission_denied(self):
-        # The role may read the view, but not the table behind it.
-        assert self.query("SELECT * FROM tests_widget") == (
-            "Query error: permission denied for table tests_widget"
-        )
-
     def test_not_a_query(self):
         assert self.query("DELETE FROM tests_widget") == (
             'Query error: syntax error at or near "DELETE"\n'
             "LINE 1: DELETE FROM tests_widget\n"
             "        ^\n"
-            "Only a single SELECT statement is allowed, or WITH, VALUES, or"
-            " TABLE."
+            "Only a single SELECT statement is allowed."
         )
 
     def test_syntax_error(self):
@@ -778,7 +681,7 @@ class PostgresServerTests(ServerTestCase, TestCase):
             seen.append(sql)
             return execute(sql, params, many, context)
 
-        with connections["reader"].execute_wrapper(wrapper):
+        with connections["postgres"].execute_wrapper(wrapper):
             self.query("SELECT 1 AS one")
         assert "SELECT 1 AS one\n" in seen
 
@@ -786,15 +689,7 @@ class PostgresServerTests(ServerTestCase, TestCase):
         assert self.query("SELECT 1; DELETE FROM tests_widget") == (
             "Query error: cannot insert multiple commands into a prepared"
             " statement\n"
-            "Only a single SELECT statement is allowed, or WITH, VALUES, or"
-            " TABLE."
-        )
-
-    def test_escape_subquery(self):
-        assert self.query("SELECT 1) q; COMMIT; --") == (
-            'Query error: syntax error at or near ")"\n'
-            "LINE 1: SELECT 1) q; COMMIT; --\n"
-            "                ^"
+            "Only a single SELECT statement is allowed."
         )
 
     def test_writing_with(self):
@@ -806,19 +701,19 @@ class PostgresServerTests(ServerTestCase, TestCase):
         )
 
     def test_read_write(self):
-        # Under TestCase, the query runs in a savepoint, so PostgreSQL gives
-        # a different reason than at the top level.
         assert self.query(
             "SELECT set_config('transaction_read_only', 'off', true)"
-        ) == (
-            "Query error: cannot set transaction read-write mode inside a"
-            " read-only transaction"
-        )
+        ) == ("Query error: transaction read-write mode must be set before any query")
 
-    def test_change_role(self):
-        assert self.query("SELECT set_config('role', 'postgres', true)") == (
-            'Query error: permission denied to set role "postgres"'
-        )
+    def test_request_transaction(self):
+        # TestCase runs the test in a transaction, like ATOMIC_REQUESTS, now
+        # with a query run, and a change made. The query runs in its own
+        # transaction, on its own connection, so doesn't see the change.
+        Widget.objects.using("postgres").create(name="Uncommitted", price="1.00")
+        assert self.query("SELECT count(*) AS n FROM tests_widget_view") == {
+            "columns": ["n"],
+            "rows": [[3]],
+        }
 
     def test_timeout(self):
         assert self.query("SELECT pg_sleep(5)") == (
@@ -847,12 +742,6 @@ class PostgresServerTests(ServerTestCase, TestCase):
             "rows": [["1s"]],
         }
 
-    def test_advisory_locks_released(self):
-        self.query("SELECT pg_advisory_lock(1)")
-        assert self.query(
-            "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'"
-        ) == {"columns": ["count"], "rows": [[0]]}
-
     def test_jsonb(self):
         assert self.query(
             """SELECT '{"a": [1]}'::jsonb AS j, 'NaN'::numeric AS n"""
@@ -867,21 +756,6 @@ class PostgresServerTests(ServerTestCase, TestCase):
             " column to text to read such values."
         )
 
-    def test_privileged_role(self):
-        # The postgres alias logs in as a superuser.
-        with pytest.raises(ImproperlyConfigured) as excinfo:
-            run_query(
-                "SELECT 1",
-                reader=make_reader(WIDGET_VIEW, using="postgres", grantor="reader"),
-                max_rows=1,
-                max_size=1000,
-                timeout=1,
-            )
-        assert str(excinfo.value).startswith(
-            "The database alias 'postgres' must log in as a role that is not a"
-            " superuser,"
-        )
-
     def test_server_error(self):
         # Errors that are not the query's fault are raised, for the server to
         # log, rather than shown to the model.
@@ -894,305 +768,6 @@ class PostgresServerTests(ServerTestCase, TestCase):
             self.assertLogs("django_mcpz", "ERROR"),
         ):
             assert self.query("SELECT 1") == "Tool 'sql_query' failed unexpectedly."
-
-
-@skip_check
-class RunQueryTransactionTests(TransactionTestCase):
-    # The reader alias is not in a transaction here, unlike in TestCase.
-    databases = {"postgres", "reader"}
-    available_apps: list[str] = []
-    widget_reader: SQLReader
-
-    @classmethod
-    def setUpClass(cls):
-        # Made before tests hide models from the app registry, with
-        # available_apps.
-        cls.widget_reader = make_reader({Widget: ["id", "name"]})
-        super().setUpClass()
-
-    def setUp(self):
-        create_widgets(using="postgres")
-        self.addCleanup(Widget.objects.using("postgres").all().delete)
-
-    def test_read_write(self):
-        with pytest.raises(ToolError) as excinfo:
-            run_query(
-                "SELECT set_config('transaction_read_only', 'off', true)",
-                reader=sql_postgres_reader,
-                max_rows=10,
-                max_size=1000,
-                timeout=1,
-            )
-        assert str(excinfo.value) == (
-            "Query error: transaction read-write mode must be set before any query"
-        )
-
-    def test_table_columns(self):
-        # Granted some columns of a table, the reader can read just those.
-        sync_grants(self.widget_reader)
-        try:
-            assert run_query(
-                "SELECT name FROM tests_widget ORDER BY name",
-                reader=self.widget_reader,
-                max_rows=10,
-                max_size=1000,
-                timeout=1,
-            ) == (["name"], [("Doohickey",), ("Gizmo",), ("Sprocket",)], False)
-            with pytest.raises(ToolError) as excinfo:
-                run_query(
-                    "SELECT price FROM tests_widget",
-                    reader=self.widget_reader,
-                    max_rows=10,
-                    max_size=1000,
-                    timeout=1,
-                )
-            assert str(excinfo.value) == (
-                "Query error: permission denied for table tests_widget"
-            )
-        finally:
-            sync_grants(sql_postgres_reader)
-
-    def test_autocommit_restored(self):
-        assert run_query(
-            "SELECT 1",
-            reader=sql_postgres_reader,
-            max_rows=10,
-            max_size=1000,
-            timeout=1,
-        ) == (
-            ["?column?"],
-            [(1,)],
-            False,
-        )
-        connection = connections["reader"]
-        assert connection.get_autocommit()
-        assert not connection.in_atomic_block
-
-
-class SyncGrantsTests(TestCase):
-    databases = {"postgres"}
-
-    def sync(self, tables):
-        return sync_grants(make_reader(tables))
-
-    def fetch(self, sql, params=None):
-        with connections["postgres"].cursor() as cursor:
-            cursor.execute(sql, params)
-            return cursor.fetchone()
-
-    def column_privileges(self, table):
-        return {
-            column: self.fetch(
-                "SELECT has_column_privilege('mcpz_test_reader', %s, %s, 'SELECT')",
-                [table, column],
-            )[0]
-            for column in ["id", "name", "price", "in_stock"]
-        }
-
-    def table_privilege(self, table):
-        return self.fetch(
-            "SELECT has_table_privilege('mcpz_test_reader', %s, 'SELECT')", [table]
-        )[0]
-
-    def any_column_privilege(self, role, table):
-        return self.fetch(
-            "SELECT has_any_column_privilege(%s, %s, 'SELECT')", [role, table]
-        )[0]
-
-    def test_view(self):
-        # As the app does after migrating. Grants are per column, so not on
-        # the table as a whole.
-        assert sync_grants(sql_postgres_reader) == []
-        assert self.any_column_privilege("mcpz_test_reader", "tests_widget_view")
-        assert not self.table_privilege("tests_widget_view")
-        assert not self.table_privilege("tests_widget")
-        assert self.column_privileges("tests_widget") == {
-            "id": False,
-            "name": False,
-            "price": False,
-            "in_stock": False,
-        }
-
-    def test_columns(self):
-        # Just the named columns of a table, and anything else is revoked.
-        self.sync({Widget: ["id", "name", "price"]})
-        assert self.column_privileges("tests_widget") == {
-            "id": True,
-            "name": True,
-            "price": True,
-            "in_stock": False,
-        }
-        assert not self.table_privilege("tests_widget")
-        assert not self.any_column_privilege("mcpz_test_reader", "tests_widget_view")
-
-    def test_revokes_stale_grants(self):
-        with connections["postgres"].cursor() as cursor:
-            cursor.execute("GRANT SELECT ON tests_widget TO mcpz_test_reader")
-            cursor.execute(
-                "GRANT SELECT (in_stock) ON tests_widget TO mcpz_test_reader"
-            )
-        self.sync({Widget: ["id", "name"]})
-        assert not self.table_privilege("tests_widget")
-        assert self.column_privileges("tests_widget") == {
-            "id": True,
-            "name": True,
-            "price": False,
-            "in_stock": False,
-        }
-
-    def test_creates_role(self):
-        with mock.patch.dict(
-            connections["reader"].settings_dict,
-            {"USER": "mcpz_test_new", "PASSWORD": "secret"},
-        ):
-            sync_grants(sql_postgres_reader)
-        assert self.fetch(
-            "SELECT rolcanlogin, rolsuper FROM pg_roles WHERE rolname = %s",
-            ["mcpz_test_new"],
-        ) == (True, False)
-        assert self.any_column_privilege("mcpz_test_new", "tests_widget_view")
-
-    def test_not_postgresql(self):
-        reader = make_reader(WIDGET_VIEW, grantor="default")
-        with pytest.raises(ImproperlyConfigured) as excinfo:
-            sync_grants(reader)
-        assert str(excinfo.value) == (
-            "The SQL tools need a PostgreSQL database, but 'default' is sqlite."
-        )
-
-    def test_no_user(self):
-        with (
-            mock.patch.dict(connections["reader"].settings_dict, {"USER": ""}),
-            pytest.raises(ImproperlyConfigured) as excinfo,
-        ):
-            sync_grants(sql_postgres_reader)
-        assert str(excinfo.value) == (
-            "The 'reader' database alias needs to set USER, the role it logs in as."
-        )
-
-    def test_same_user(self):
-        with (
-            mock.patch.dict(
-                connections["reader"].settings_dict,
-                {"USER": connections["postgres"].settings_dict["USER"]},
-            ),
-            pytest.raises(ImproperlyConfigured) as excinfo,
-        ):
-            sync_grants(sql_postgres_reader)
-        assert str(excinfo.value).startswith(
-            "The 'reader' and 'postgres' database aliases log in as the same role,"
-        )
-
-    def test_missing_table(self):
-        # As after unapplying the migration that creates it: skipped, with
-        # the rest still synced.
-        assert self.sync({Undocumented: ["id"], Widget: ["id", "name"]}) == [
-            "tests_undocumented"
-        ]
-        assert self.column_privileges("tests_widget") == {
-            "id": True,
-            "name": True,
-            "price": False,
-            "in_stock": False,
-        }
-
-    def test_missing_column(self):
-        # As before the migration adding it is applied: skipped.
-        assert self.sync({WidgetLater: ["id", "name", "colour"]}) == [
-            "tests_widget.colour"
-        ]
-        assert self.column_privileges("tests_widget") == {
-            "id": True,
-            "name": True,
-            "price": False,
-            "in_stock": False,
-        }
-
-    def test_no_columns(self):
-        # Nothing left to grant, not even schema usage, for this table.
-        assert self.sync({WidgetLater: ["colour"]}) == ["tests_widget.colour"]
-        assert not self.any_column_privilege("mcpz_test_reader", "tests_widget")
-        assert not self.any_column_privilege("mcpz_test_reader", "tests_widget_view")
-
-
-class SyncPasswordTests(TransactionTestCase):
-    # Logging in with the password needs it committed, so this isn't a
-    # TestCase. With no available apps, nothing is flushed.
-    databases = {"postgres"}
-    available_apps: list[str] = []
-
-    def test_sets_password(self):
-        reader_settings = connections["reader"].settings_dict
-        with mock.patch.dict(reader_settings, {"PASSWORD": "rotated"}):
-            sync_grants(sql_postgres_reader)
-            assert self.password_works("rotated")
-        sync_grants(sql_postgres_reader)
-        assert self.password_works(reader_settings["PASSWORD"])
-        assert not self.password_works("rotated")
-
-    def password_works(self, password):
-        settings = connections["reader"].settings_dict
-        try:
-            psycopg.connect(
-                host=settings["HOST"],
-                port=settings["PORT"],
-                dbname=settings["NAME"],
-                user=settings["USER"],
-                password=password,
-            ).close()
-        except psycopg.OperationalError:
-            return False
-        return True
-
-    def test_keeps_password_without_permission(self):
-        with (
-            mock.patch.dict(
-                connections["reader"].settings_dict, {"PASSWORD": "rotated"}
-            ),
-            mock.patch(
-                "django_mcpz.sql.grants._ROLE_SQL", "SELECT false WHERE %s IS NOT NULL"
-            ),
-        ):
-            sync_grants(sql_postgres_reader)
-        assert not self.password_works("rotated")
-        assert self.password_works(connections["reader"].settings_dict["PASSWORD"])
-
-
-class SyncReadersTests(SimpleTestCase):
-    def test_autodiscovers(self):
-        # Readers are found by importing apps' mcp modules.
-        with mock.patch("django_mcpz.sql.grants.autodiscover_modules") as discover:
-            sync_readers(using="default")
-        discover.assert_called_once_with("mcp")
-
-    def test_only_readers_of_alias(self):
-        with mock.patch("django_mcpz.sql.grants.sync_grants", return_value=[]) as sync:
-            sync_readers(using="default")
-            sync.assert_not_called()
-            sync_readers(using="postgres")
-        sync.assert_called_once()
-        assert sync.call_args.args[0] is sql_postgres_reader
-
-    def test_reports_missing(self):
-        stdout = io.StringIO()
-        with mock.patch(
-            "django_mcpz.sql.grants.sync_grants",
-            return_value=["tests_widget_view", "tests_widget.colour"],
-        ):
-            sync_readers(using="postgres", verbosity=1, stdout=stdout)
-            sync_readers(using="postgres", verbosity=0, stdout=stdout)
-        assert stdout.getvalue() == (
-            "  Granted 'reader' no access to these, missing from the database:"
-            " tests_widget_view, tests_widget.colour.\n"
-        )
-
-    def test_reports_missing_default_stdout(self):
-        with (
-            mock.patch("django_mcpz.sql.grants.sync_grants", return_value=["tests_x"]),
-            mock.patch("sys.stdout", new_callable=io.StringIO) as stdout,
-        ):
-            sync_readers(using="postgres")
-        assert "tests_x" in stdout.getvalue()
 
 
 @skip_check
@@ -1254,34 +829,6 @@ class SQLiteServerTests(ServerTestCase, TransactionTestCase):
             " tests_widget)"
         ) == {"columns": ["name"], "rows": [["Sprocket"]]}
 
-    def test_view_unlisted_column(self):
-        assert self.query("SELECT price FROM tests_widget_view") == (
-            "Query error: access to tests_widget_view.price is prohibited"
-        )
-
-    def test_unlisted_column(self):
-        assert self.query("SELECT in_stock FROM tests_widget") == (
-            "Query error: access to tests_widget.in_stock is prohibited"
-        )
-
-    def test_unlisted_table(self):
-        assert self.query("SELECT username FROM auth_user") == (
-            "Query error: access to auth_user.username is prohibited"
-        )
-
-    def test_with_unlisted_column(self):
-        assert self.query(
-            "WITH x AS (SELECT in_stock FROM tests_widget) SELECT * FROM x"
-        ) == ("Query error: access to tests_widget.in_stock is prohibited")
-
-    def test_with_named_as_view(self):
-        # Reads inside the view and the common table expression look alike to
-        # the authorizer, both tagged tests_widget_view.
-        assert self.query(
-            "WITH tests_widget_view AS (SELECT in_stock FROM tests_widget)"
-            " SELECT * FROM tests_widget_view, main.tests_widget_view"
-        ) == ("Query error: access to tests_widget.in_stock is prohibited")
-
     def test_with_view(self):
         assert self.query(
             "WITH x AS (SELECT name FROM tests_widget_view) SELECT count(*) AS n,"
@@ -1294,34 +841,9 @@ class SQLiteServerTests(ServerTestCase, TransactionTestCase):
             "rows": [[3]],
         }
 
-    def test_count_unlisted_table(self):
-        assert self.query("SELECT count(*) FROM auth_user") == (
-            "Query error: not authorized\n"
-            "Only a single SELECT statement is allowed, or WITH, VALUES, or TABLE."
-        )
-
-    def test_python_functions(self):
-        assert self.query("SELECT repeat('x', 3)") == (
-            "Query error: not authorized to use function: repeat"
-        )
-        assert self.query("SELECT 'a' REGEXP 'a'") == (
-            "Query error: not authorized to use function: REGEXP"
-        )
-
     def test_too_long(self):
         assert self.query("SELECT length(zeroblob(100000000)) AS n") == (
             "Query error: string or blob too big"
-        )
-
-    def test_star(self):
-        # SELECT * reads every column, including unlisted ones.
-        assert self.query("SELECT * FROM tests_widget") == (
-            "Query error: access to tests_widget.in_stock is prohibited"
-        )
-
-    def test_schema_table(self):
-        assert self.query("SELECT sql FROM sqlite_master") == (
-            "Query error: access to sqlite_master.sql is prohibited"
         )
 
     def test_with_and_functions(self):
@@ -1338,33 +860,18 @@ class SQLiteServerTests(ServerTestCase, TransactionTestCase):
         }
 
     def test_delete(self):
+        # PRAGMA query_only stops writes the checker would reject.
         assert self.query("DELETE FROM tests_widget") == (
-            "Query error: not authorized\n"
-            "Only a single SELECT statement is allowed, or WITH, VALUES, or TABLE."
+            "Query error: attempt to write a readonly database"
         )
         assert Widget.objects.count() == 3
 
     def test_multiple_statements(self):
         assert self.query("SELECT 1; DELETE FROM tests_widget") == (
             "Query error: You can only execute one statement at a time.\n"
-            "Only a single SELECT statement is allowed, or WITH, VALUES, or TABLE."
+            "Only a single SELECT statement is allowed."
         )
         assert Widget.objects.count() == 3
-
-    def test_pragma(self):
-        assert self.query("PRAGMA query_only = off").startswith(
-            "Query error: not authorized"
-        )
-
-    def test_attach(self):
-        assert self.query("ATTACH DATABASE ':memory:' AS other").startswith(
-            "Query error: not authorized"
-        )
-
-    def test_denied_function(self):
-        assert self.query("SELECT load_extension('x')") == (
-            "Query error: not authorized to use function: load_extension"
-        )
 
     def test_syntax_error(self):
         assert self.query("SELECT FROM") == ('Query error: near "FROM": syntax error')
@@ -1431,27 +938,6 @@ class SQLiteServerTests(ServerTestCase, TransactionTestCase):
             "The SQL tools can't query the database alias 'default', a private"
             " in-memory SQLite database, which only its own connection can open."
         )
-
-    def test_schema_copy_fallback(self):
-        # The copy can't recreate a table using a collation only the app's
-        # connection has, so makes it a table of its columns instead.
-        connection = connections["default"]
-        connection.ensure_connection()
-        connection.connection.create_collation("backwards", lambda a, b: 0)
-        with connection.cursor() as cursor:
-            cursor.execute("CREATE TABLE tests_collated (name TEXT COLLATE backwards)")
-        self.addCleanup(self.drop_collated)
-        assert self.query("SELECT count(*) AS n FROM tests_widget") == {
-            "columns": ["n"],
-            "rows": [[3]],
-        }
-        assert self.query("SELECT name FROM tests_collated") == (
-            "Query error: access to tests_collated.name is prohibited"
-        )
-
-    def drop_collated(self):
-        with connections["default"].cursor() as cursor:
-            cursor.execute("DROP TABLE tests_collated")
 
     def test_close_unconnected(self):
         # Closing a connection that never connected, after failing to.

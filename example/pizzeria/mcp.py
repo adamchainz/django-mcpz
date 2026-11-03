@@ -303,8 +303,8 @@ def menu_link(request: HttpRequest, params: MenuLinkParams) -> ResourceLink:
 
 # Ad hoc reporting over the read-only views, for questions the other tools
 # don't answer, like "which pizza sold best last month?" Only these columns
-# can be read, checked as each query runs: fields not named here stay hidden,
-# even if they are added to the models later.
+# can be read, checked before each query runs: fields not named here stay
+# hidden, even if they are added to the models later.
 reports_reader = SQLReader(
     tables={
         MenuItem: [
@@ -330,7 +330,4 @@ add_sql_tools(
     server,
     reader=reports_reader,
     context="MCPizza's sales data. Prices and totals are in pounds (GBP).",
-    # Every caller sees every table, since this local demo has no users. By
-    # default, each user sees the tables they have the view permission for.
-    can_view=lambda request, model: True,
 )

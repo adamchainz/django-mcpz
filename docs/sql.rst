@@ -12,16 +12,10 @@ Rather than writing a tool for every question someone might ask of your data, yo
 This works with PostgreSQL, through `psycopg 3 <https://www.psycopg.org/psycopg3/>`__, and SQLite.
 
 The LLM writes the SQL, and the SQL may come from whoever it is talking to, and whatever text it has read, so treat it as untrusted.
-On PostgreSQL, never give the LLM your application’s database role: the tools are designed for a dedicated role that can read chosen columns of chosen tables and views, and nothing else.
-SQLite has no roles, so instead the tools check every read as each query runs, as covered in :ref:`sql-sqlite`.
+Before running each query, the tools parse it and check it reads only the tables and columns you list, and calls only safe functions, as covered in :ref:`sql-checking`.
 
 Setup
 -----
-
-These steps are for PostgreSQL.
-For SQLite, skip the database alias, and leave ``using`` as ``"default"``, as covered in :ref:`sql-sqlite`.
-
-The setup takes four steps: installing the app, a database alias for the role, a reader listing what the role can read, and the tools.
 
 1. Install django-mcpz with the ``sql`` extra, which adds the query checker, a compiled Rust extension:
 
@@ -29,45 +23,7 @@ The setup takes four steps: installing the app, a database alias for the role, a
 
        python -m pip install 'django-mcpz[sql]'
 
-   Then add the ``django_mcpz.sql`` app to your ``INSTALLED_APPS``:
-
-   .. code-block:: python
-
-       INSTALLED_APPS = [
-           ...,
-           "django_mcpz.sql",
-           ...,
-       ]
-
-   After every ``migrate``, it creates and updates the readers’ roles, as below.
-
-2. Add a database alias that connects as the role, which the app creates:
-
-   .. code-block:: python
-
-       DATABASES = {
-           "default": {
-               "ENGINE": "django.db.backends.postgresql",
-               "NAME": "app",
-               # ...
-           },
-           "mcp_reader": {
-               "ENGINE": "django.db.backends.postgresql",
-               "NAME": "app",
-               "USER": "mcp_reader",
-               "PASSWORD": os.environ["MCP_READER_PASSWORD"],
-               # In tests, connect to the default alias’s test database, as
-               # the reader role, rather than creating another.
-               "TEST": {"MIRROR": "default"},
-           },
-       }
-
-   The alias must log in as its own role.
-   Django’s ``assume_role`` option won’t do, since queries could switch back to the login role, so :class:`~django_mcpz.sql.readers.SQLReader` rejects it.
-
-   If you use a `database router <https://docs.djangoproject.com/en/stable/topics/db/multi-db/#database-routers>`__, make sure it doesn’t send migrations to this alias.
-
-3. Define a :class:`~django_mcpz.sql.readers.SQLReader` alongside your MCP server, in your app’s ``mcp`` module, naming the alias, and listing the columns the role can read as a dict of models to field names:
+2. Define a :class:`~django_mcpz.sql.readers.SQLReader` alongside your MCP server, in your app’s ``mcp`` module, listing the columns queries may read, as a dict of models to field names:
 
    .. code-block:: python
 
@@ -75,7 +31,6 @@ The setup takes four steps: installing the app, a database alias for the role, a
        from example.models import Order, Pizza
 
        reports_reader = SQLReader(
-           using="mcp_reader",
            tables={
                Pizza: ["id", "name", "price", "vegetarian"],
                Order: ["id", "pizza_id", "quantity", "total", "placed_at"],
@@ -85,33 +40,11 @@ The setup takes four steps: installing the app, a database alias for the role, a
    Each field is a column of the model’s table, named by the field’s name, or, for foreign keys, its attribute name, like ``pizza_id``.
    Only the named columns are exposed, so adding a field to a model later never exposes its column, such as ``Order.requests`` here, which holds customers’ free text.
 
-   After every ``migrate``, the app makes the role match the reader:
-
-   * it creates the role if it doesn’t exist, with the alias’s ``PASSWORD``, or else sets that ``PASSWORD``, so rotating it takes effect, if the alias has one and the grantor may change it;
-   * grants it ``CONNECT`` on the database and ``USAGE`` on the tables’ schemas;
-   * revokes everything previously granted to it on tables and columns, then grants ``SELECT`` on exactly the listed columns.
-
-   It all happens in one transaction, so the role never sees a half-way state.
-
-   Listed tables and columns missing from the database are skipped, and reported in ``migrate``’s output.
-   This happens after migrations are unapplied, or applied only up to an earlier one, leaving the database behind the models, until a later ``migrate`` catches up and grants them.
-
-   The ``default`` alias’s role makes these changes, unless you pick another with ``grantor``, so it needs permission to create roles, or create the role yourself beforehand, and must own the tables, or be able to grant on them.
-   It also runs when the test runner creates the test database, so the role has its grants there too.
-
-   To find the readers, the app imports each installed app’s ``mcp`` module after migrating, as the admin does for ``admin`` modules.
-   So define readers in your apps’ ``mcp`` modules, alongside the servers that use them, as covered in :doc:`servers`, or in modules they import.
-   Each alias can have only one reader, since its role can only have one set of grants, so share it between servers, rather than defining it twice.
-
-   With column-level grants, ``SELECT *`` on a table with unexposed columns fails with “permission denied”, but the schema lists only the exposed columns, so the LLM names them instead.
-
-   Don’t make the role a member of any other role, which it could switch to with ``SET ROLE``.
-   Each query checks that the login role isn’t a superuser, can’t bypass row-level security, and isn’t a member of other roles, failing with ``ImproperlyConfigured`` otherwise.
+   Queries run through the ``default`` database alias, unless you pick another with ``using``.
 
    Listing some columns of tables works for many cases.
    To expose some rows, derived values, or joins, create a view, such as in a migration with |RunSQL|__, define an unmanaged model for it, and list that.
-   Views run with the privileges of their owner, so the role needs no access to the tables behind them.
-   They also make a stable interface, which the LLM can learn, decoupled from your tables.
+   Views also make a stable interface, which the LLM can learn, decoupled from your tables.
    For example, the example project exposes whether each order has requests, but not their text:
 
    .. code-block:: python
@@ -170,7 +103,7 @@ The setup takes four steps: installing the app, a database alias for the role, a
    .. |db_comment| replace:: ``db_comment``
    __ https://docs.djangoproject.com/en/stable/ref/models/fields/#db-comment
 
-4. Add the tools to your server, with the reader:
+3. Add the tools to your server, with the reader:
 
    .. code-block:: python
 
@@ -184,6 +117,55 @@ The setup takes four steps: installing the app, a database alias for the role, a
 
    ``context`` is optional text at the top of the table list, for anything that applies across tables.
    See :func:`add_sql_tools` for the other options.
+
+Who sees what
+-------------
+
+By default, every call sees all the reader’s tables.
+Pass ``view_permissions=True`` to the reader to limit each call to the tables whose models its user has the view permission for, ``<app_label>.view_<model_name>``, as the admin checks:
+
+.. code-block:: python
+
+    reports_reader = SQLReader(
+        tables={
+            Pizza: ["id", "name", "price", "vegetarian"],
+            Order: ["id", "pizza_id", "quantity", "total", "placed_at"],
+        },
+        view_permissions=True,
+    )
+
+Then grant users and groups the view permissions for the tables they may query.
+``sql_schema`` lists and describes only their tables, and ``sql_query`` checks queries against only those.
+Users without any see an empty table list.
+
+.. _sql-checking:
+
+Checking queries
+----------------
+
+``sql_query`` checks each query before it runs, with the ``django-mcpz-sqlcheck`` package, which parses it with `sqlparser <https://github.com/apache/datafusion-sqlparser-rs>`__.
+The checker is conservative, allowing only what it fully understands:
+
+* One ``SELECT``, optionally with ``WITH``, and ``UNION``, ``INTERSECT``, or ``EXCEPT``.
+  No other statements, no ``WITH RECURSIVE``, locking clauses, ``SELECT INTO``, or ``LATERAL``.
+
+* Tables, by unqualified name, of those the call can see, plus the query’s own ``WITH`` tables and subqueries, which need aliases.
+
+* Columns, named, rather than ``*``, of the reader’s listed columns.
+  An unqualified column must be listed for exactly one table of the innermost query with tables, since the database resolves names there first, possibly to a column the checker doesn’t know about.
+  Otherwise, qualify it with its table’s name or alias.
+
+* Joins, with ``ON`` or ``USING``, but not ``NATURAL``.
+
+* Functions from a list per database: aggregates, window functions, and common functions on numbers, text, dates, and JSON, such as ``count()``, ``round()``, ``coalesce()``, ``lower()``, ``date_trunc()`` on PostgreSQL, and ``strftime()`` on SQLite.
+  Mostly the same on both, so queries work on either, and none reach beyond the query’s own data, such as into settings, files, or other sessions.
+
+* Arithmetic, comparison, ``LIKE``, ``->``, and ``->>`` operators, ``CASE``, ``CAST`` to plain types, plain numbers, and ``'single-quoted'`` strings.
+
+Anything else is returned to the LLM as an error saying what isn’t allowed, so it can rewrite the query.
+
+The query that runs is the checked one, rendered back to SQL from what the checker parsed, rather than the original text.
+So the database runs what was checked, even where its own parser would read the text differently.
 
 What the LLM sees
 -----------------
@@ -245,132 +227,40 @@ When rows are left out, the result adds ``"truncated": true`` and a ``"note"`` t
 Rows are left out past ``max_rows``, or when the result would exceed ``max_size``.
 Long values are shortened too, to a fair share of ``max_size``, so a single huge value can’t flood the LLM’s context.
 
-Errors in the query, such as syntax errors, unknown columns, and permission denied, are returned to the LLM as tool errors, with the database’s message, so it can correct itself.
-
-.. _sql-checking:
-
-Who sees what
--------------
-
-Each call sees only the reader’s tables that ``can_view`` allows for its request.
-By default, that’s :func:`view_permission`, the tables whose models the user has the view permission for, ``<app_label>.view_<model_name>``, as the admin checks.
-So grant users and groups the view permissions for the tables they may query, or pass your own function:
-
-.. code-block:: python
-
-    def can_view(request, model):
-        return request.user.is_staff
-
-
-    add_sql_tools(server, reader=reports_reader, can_view=can_view)
-
-``sql_schema`` lists and describes only the visible tables, and ``sql_query`` checks each query before it runs, with the ``django-mcpz-sqlcheck`` package, which parses it with `sqlparser <https://github.com/apache/datafusion-sqlparser-rs>`__.
-The checker is conservative, allowing only what it fully understands:
-
-* One ``SELECT``, optionally with ``WITH``, and ``UNION``, ``INTERSECT``, or ``EXCEPT``.
-  No other statements, no ``WITH RECURSIVE``, locking clauses, ``SELECT INTO``, or ``LATERAL``.
-
-* Tables, by unqualified name, of the visible ones, plus the query’s own ``WITH`` tables and subqueries, which need aliases.
-
-* Columns, named, rather than ``*``, and readable, as listed by the reader.
-  An unqualified column must be readable in exactly one table of the innermost query with tables, since the database resolves names there first, possibly to a column the checker can’t see.
-  Otherwise, qualify it with its table’s name or alias.
-
-* Joins, with ``ON`` or ``USING``, but not ``NATURAL``.
-
-* Functions from a list per database: aggregates, window functions, and common functions on numbers, text, dates, and JSON, such as ``count()``, ``round()``, ``coalesce()``, ``lower()``, ``date_trunc()`` on PostgreSQL, and ``strftime()`` on SQLite.
-  None reach beyond the query’s own data.
-
-* Arithmetic, comparison, ``LIKE``, ``->``, and ``->>`` operators, ``CASE``, ``CAST`` to plain types, plain numbers, and ``'single-quoted'`` strings.
-
-Anything else is returned to the LLM as an error saying what isn’t allowed, so it can rewrite the query.
-
-The query that runs is the checked one, rendered back to SQL from what the checker parsed, rather than the original text.
-So the database runs what was checked, even where its own parser would read the text differently.
-
-The checker is one layer.
-The reader still sets the most any call can read, enforced by the database, with the role on PostgreSQL and the authorizer on SQLite, as below.
+Errors in the query, such as syntax errors and checks it fails, are returned to the LLM as tool errors, so it can correct itself.
 
 Security
 --------
 
-On PostgreSQL, the role is the security boundary: the LLM can read whatever the role can.
-The tools add more limits on top:
+The checker is the security boundary: queries run through the reader’s database alias, as its user, so a query the checker wrongly allowed could read anything that user can.
+For more defence, point ``using`` at an alias whose user can only read, or at a read replica.
 
-* Each query runs in a ``READ ONLY`` transaction, which is always rolled back.
-  That reverts any settings the query changed with ``set_config()``.
+On top of the checker, the tools limit what a query can do beyond reading:
 
-* The query runs through a server-side cursor, as ``DECLARE ... CURSOR FOR <query>``, sent with PostgreSQL’s extended query protocol.
-  This accepts one statement only, so no ``; COMMIT; ...`` tricks, and that statement must be a query: ``SELECT``, ``WITH``, ``VALUES``, or ``TABLE``.
-  Data-modifying statements are rejected even inside ``WITH``.
+* Each query runs on a fresh connection to the alias’s database, closed afterwards.
+  So it sees only committed data, not uncommitted changes in the current request’s transaction, and leaves your app’s own connection untouched.
+  It costs a new database connection per query.
+  Hooks you add to the alias’s connection with |execute_wrapper|__ apply to it too.
 
-* A watchdog thread cancels the query once the timeout has passed, including fetching its rows.
-  A ``statement_timeout`` also stops each statement that runs too long, but the query could turn it off with ``set_config()``, which the watchdog doesn’t depend on.
+* On PostgreSQL, the query runs in a ``READ ONLY`` transaction, which is never committed.
+
+* On PostgreSQL, the query runs through a server-side cursor, as ``DECLARE ... CURSOR FOR <query>``, sent with PostgreSQL’s extended query protocol.
+  This accepts one statement only, and that statement must be a query.
+
+* On PostgreSQL, a watchdog thread cancels the query once the timeout has passed, including fetching its rows, and a ``statement_timeout`` stops each statement that runs too long.
+
+* On SQLite, the connection is set to ``PRAGMA query_only``.
+  A progress handler on it cancels queries that run longer than the timeout, and a length limit stops any query making a string or blob longer than 16 MiB.
+  A private in-memory database, ``":memory:"``, can’t work, since each connection to one gets its own, empty, database.
 
 * Rows are fetched from the cursor in batches, stopping at ``max_rows``, or once values totalling ``max_size`` have arrived.
   The first batch is a single row, and later ones are sized to fit what remains of ``max_size``, so a query for millions of rows, or for huge values, transfers only the first few.
 
-* Session-level advisory locks, taken with functions like ``pg_advisory_lock()``, are released after each query, as they survive the rollback.
-
-Some things the role can still do, given PostgreSQL’s defaults:
-
-* Read the system catalogs, such as ``pg_class`` and ``pg_attribute``, which list every table and column, though not their data, ``pg_views``, which shows the definitions of views, and ``pg_roles``, which lists role names.
-  It can’t read the data of tables and columns it wasn’t granted, or other roles’ queries in ``pg_stat_activity``.
-
-* See other sessions of the same role in ``pg_stat_activity``, including their SQL, and cancel or terminate them.
-  Since every caller of the tools shares the role, one could see another’s queries, which may quote their conversation.
-  To hide them, a superuser can run ``ALTER ROLE mcp_reader SET track_activities = off``.
-
-* Take advisory locks, which are database-wide, for up to the timeout, which could block your application if it uses them.
-
-* Use CPU, memory, and I/O for up to the timeout, per call.
-  A row is transferred in full, so a query returning a huge value, such as from ``repeat('x', 100000000)``, uses that much memory in your Django process before it is shortened.
-
-Use your server’s ``auth`` and the ``permission`` argument to limit who can call the tools, and consider pointing the alias at a read replica.
-
-The tools are marked as read-only, with ``readOnlyHint``, so clients may run them without asking the user each time.
-
-.. _sql-sqlite:
-
-SQLite
-------
-
-SQLite has no roles or grants, so there’s no separate database alias or ``migrate`` step.
-Define the reader on your usual alias, leaving ``using`` as ``"default"``:
-
-.. code-block:: python
-
-    reports_reader = SQLReader(
-        tables={
-            Pizza: ["id", "name", "price", "vegetarian"],
-            Order: ["id", "pizza_id", "quantity", "total", "placed_at"],
-        },
-    )
-
-Instead, each query runs on a fresh connection to the alias’s database, set to ``PRAGMA query_only``, and closed afterwards.
-That connection has an `authorizer callback <https://docs.python.org/3/library/sqlite3.html#sqlite3.Connection.set_authorizer>`__, which SQLite asks about every read and action as it compiles the query:
-
-* Reading the listed columns is allowed, as is counting the rows of the listed tables, with ``count(*)``.
-  Reading anything else, including SQLite’s own tables like ``sqlite_master``, fails with “access to … is prohibited”.
-
-* Every other action is denied: writes, ``ATTACH``, ``PRAGMA``, transaction control, functions that reach outside the database, like ``load_extension()``, and the functions Django defines in Python whose cost is unbounded, ``LPAD()``, ``RPAD()``, ``REPEAT()``, and ``REGEXP``.
-
-* Python’s ``sqlite3`` module runs only one statement per query.
-
-The authorizer sees reads inside views as reads of the tables behind them, tagged with the view’s name, but it sees reads inside a ``WITH`` clause the same way, tagged with names the query picks, which could match a view’s.
-So before running the query, the tools compile it, with ``EXPLAIN``, against an in-memory copy of the database’s schema, in which each view is a table of its columns, where the authorizer allows only the listed columns, wherever they’re read.
-Once that passes, the real query may read what its views read.
-
-A progress handler on the connection cancels queries that run longer than the timeout, and a length limit stops any query making a string or blob longer than 16 MiB, failing with “string or blob too big”.
-
-The fresh connection leaves your app’s own connection untouched, including any authorizer or progress handler you set on it, which Python’s ``sqlite3`` has no way to read back and restore.
-With the schema copy, it costs a millisecond or two per query, for a database file of a dozen tables, more with more tables.
-Hooks you add to the alias’s connection with |execute_wrapper|__ apply to it too.
-Like on PostgreSQL, the query sees only committed data, not uncommitted changes in the current request’s transaction.
-A private in-memory database, ``":memory:"``, can’t work, since each connection to one gets its own, empty, database.
-
 .. |execute_wrapper| replace:: ``execute_wrapper()``
 __ https://docs.djangoproject.com/en/stable/topics/db/instrumentation/
 
-The checks are only as good as SQLite’s authorizer, and the fresh connection reads the same database file as your app, with the same functions registered by its ``connection_created`` handlers, so a gap in them could reach any data the app can.
-For untrusted callers, PostgreSQL with a dedicated role is the stronger boundary.
+A query can still use CPU, memory, and I/O for up to the timeout, per call.
+
+Use your server’s ``auth`` and the ``permission`` argument to limit who can call the tools.
+
+The tools are marked as read-only, with ``readOnlyHint``, so clients may run them without asking the user each time.

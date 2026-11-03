@@ -1,7 +1,6 @@
 """
-Read-only database roles for the SQL tools, defined with SQLReader alongside
-the tools, and what each can read, for both the tools and the grants that
-enforce it.
+What the SQL tools can read, defined with SQLReader alongside the tools: the
+outer limit on every query, of tables and their columns.
 """
 
 from __future__ import annotations
@@ -11,16 +10,14 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from django.conf import settings
+from django.contrib.auth import get_permission_codename
 from django.core.exceptions import FieldDoesNotExist, ImproperlyConfigured
 from django.db import connections
 from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.models import Field, Model
+from django.http import HttpRequest
 
 from django_mcpz.sql.queries import get_query
-
-# Every reader defined, by database alias, for the post_migrate handler to
-# sync, after importing each app's mcp module.
-_readers: dict[str, SQLReader] = {}
 
 
 class Table:
@@ -47,52 +44,41 @@ class Table:
 class SQLReader:
     """
     What the SQL tools can read: the columns of the models' tables, through
-    the database alias using.
+    the database alias using. Every field must be named, so adding a field
+    to a model never exposes its column. The tools check each query reads
+    only these, before running it.
 
-    On PostgreSQL, using logs in as its own role, and after every migrate,
-    the django_mcpz.sql app makes the role able to read exactly these
-    columns, from the grantor alias. On SQLite, the tools allow reading only
-    these columns as each query runs. Every field must be named, so adding a
-    field to a model never exposes its column.
+    With view_permissions, each request sees only the tables whose models
+    its user has the view permission for.
     """
 
-    __slots__ = ("using", "grantor", "tables")
+    __slots__ = ("using", "tables", "view_permissions")
 
     using: str
-    grantor: str
     tables: tuple[Table, ...]
+    view_permissions: bool
 
     def __init__(
         self,
         *,
         tables: Mapping[type[Model], Sequence[str]],
         using: str = "default",
-        grantor: str = "default",
+        view_permissions: bool = False,
     ) -> None:
-        for name, alias in (("using", using), ("grantor", grantor)):
-            if alias not in settings.DATABASES:
-                raise ImproperlyConfigured(
-                    f"SQLReader {name}={alias!r} isn't a database alias in DATABASES."
-                )
+        if using not in settings.DATABASES:
+            raise ImproperlyConfigured(
+                f"SQLReader using={using!r} isn't a database alias in DATABASES."
+            )
         connection = connections[using]
         get_query(connection)
         if connection.vendor == "postgresql":
-            _check_postgresql(connection, grantor)
-        resolved = tuple(_resolve_tables(tables, connection))
-        existing = _readers.get(using)
-        if existing is not None and (
-            existing.grantor != grantor
-            or [(t.model, t.fields) for t in existing.tables]
-            != [(t.model, t.fields) for t in resolved]
-        ):
-            raise ImproperlyConfigured(
-                f"Two SQLReaders for {using!r} differ, but its role can have"
-                " only one set of grants. Define it once and share it."
-            )
+            try:
+                import psycopg  # noqa: F401
+            except ImportError:  # pragma: no cover
+                raise ImproperlyConfigured("The SQL tools need psycopg 3.") from None
         object.__setattr__(self, "using", using)
-        object.__setattr__(self, "grantor", grantor)
-        object.__setattr__(self, "tables", resolved)
-        _readers[using] = self
+        object.__setattr__(self, "tables", tuple(_resolve_tables(tables, connection)))
+        object.__setattr__(self, "view_permissions", view_permissions)
 
     def __setattr__(self, name: str, value: Any) -> None:
         raise AttributeError("SQLReader is immutable.")
@@ -100,26 +86,22 @@ class SQLReader:
     def __delattr__(self, name: str) -> None:
         raise AttributeError("SQLReader is immutable.")
 
-
-def _check_postgresql(connection: BaseDatabaseWrapper, grantor: str) -> None:
-    """The reader's alias must log in as its own role, with psycopg 3."""
-    using = connection.alias
-    try:
-        import psycopg  # noqa: F401
-    except ImportError:  # pragma: no cover
-        raise ImproperlyConfigured("The SQL tools need psycopg 3.") from None
-    if using == grantor:
-        raise ImproperlyConfigured(
-            f"SQLReader needs using, the alias that logs in as the reader"
-            f" role, to differ from grantor, the alias whose role grants it"
-            f" access, but both are {using!r}."
-        )
-    if connection.settings_dict["OPTIONS"].get("assume_role"):
-        raise ImproperlyConfigured(
-            f"SQLReader needs using={using!r} to log in as the reader role, not"
-            " use assume_role, since queries could switch back to the login"
-            " role with set_config('role', ...)."
-        )
+    def visible_tables(self, request: HttpRequest) -> list[Table]:
+        """
+        The tables the request may see: all of them, or with
+        view_permissions, those whose models its user has the view
+        permission for, as the admin checks.
+        """
+        if not self.view_permissions:
+            return list(self.tables)
+        return [
+            table
+            for table in self.tables
+            if request.user.has_perm(
+                f"{table.model._meta.app_label}."
+                f"{get_permission_codename('view', table.model._meta)}"
+            )
+        ]
 
 
 def _resolve_tables(tables: Any, connection: BaseDatabaseWrapper) -> list[Table]:

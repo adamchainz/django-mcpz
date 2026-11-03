@@ -24,7 +24,6 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 INSTALLED_APPS = [
     "pizzeria",
     "django_mcpz",
-    "django_mcpz.sql",
     "django.contrib.staticfiles",
 ]
 

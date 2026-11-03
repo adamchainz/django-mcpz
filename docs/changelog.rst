@@ -5,11 +5,10 @@ Changelog
 Unreleased
 ----------
 
-* Add the ``django_mcpz.sql`` app, whose ``add_sql_tools()`` adds tools letting an LLM run read-only SQL queries against chosen columns of tables and views, plus describe them, on PostgreSQL or SQLite.
-  A ``SQLReader``, defined alongside the tools, lists those columns, and the app maintains the database role the queries run as to match, after every ``migrate``.
+* Add SQL tools, whose ``add_sql_tools()`` adds tools letting an LLM run read-only SQL queries against chosen columns of tables and views, plus describe them, on PostgreSQL or SQLite.
+  A ``SQLReader``, defined alongside the tools, lists those columns, and optionally limits each user to the tables they have the view permission for.
+  Queries are checked before they run by ``django-mcpz-sqlcheck``, a Rust extension, installed with the ``sql`` extra.
   See :doc:`sql`.
-
-  Each call sees only the tables the user has the view permission for, and queries are checked before they run by ``django-mcpz-sqlcheck``, a Rust extension, installed with the ``sql`` extra.
 
   `PR #42 <https://github.com/adamchainz/django-mcpz/pull/42>`__.
 

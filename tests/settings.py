@@ -15,7 +15,7 @@ POSTGRES: dict[str, Any] = {
     "PORT": "55432",
     "USER": "postgres",
     "PASSWORD": "postgres",
-    # Set up without the default database, for tests that use only these.
+    # Set up without the default database, for tests that use only this.
     "TEST": {"DEPENDENCIES": []},
 }
 
@@ -25,13 +25,6 @@ DATABASES: dict[str, dict[str, Any]] = {
         "NAME": ":memory:",
     },
     "postgres": POSTGRES,
-    # The same test database, as the role the django_mcpz.sql app maintains
-    # after migrating, which may only read the tests_widget_view view.
-    "reader": {
-        **POSTGRES,
-        "USER": "mcpz_test_reader",
-        "PASSWORD": "mcpz_test_reader",
-    },
 }
 
 INSTALLED_APPS = [
@@ -43,7 +36,6 @@ INSTALLED_APPS = [
     "django_mcpz",
     "django_mcpz.oauth",
     "django_mcpz.bearer_tokens",
-    "django_mcpz.sql",
     "tests",
 ]
 

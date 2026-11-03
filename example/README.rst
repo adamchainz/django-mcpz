@@ -35,7 +35,7 @@ The included tools are:
 * ``menu_link``: a link to the menu web page for a date, past or future, for the user to open in a browser.
 
 * ``sql_schema`` and ``sql_query``: ad hoc reporting with SQL, over read-only views of the menu and three months of orders, with `the SQL tools <https://django-mcpz.readthedocs.io/en/latest/sql.html>`__.
-  They check each query’s reads as it runs, allowing only the columns listed by the ``SQLReader`` in ``pizzeria/mcp.py``.
+  They check each query before it runs, allowing only the columns listed by the ``SQLReader`` in ``pizzeria/mcp.py``.
 
 Setup
 -----

@@ -65,10 +65,8 @@ class CheckQueryTests(ParametrizedTestCase, SimpleTestCase):
                 id="using",
             ),
             param(
-                "SELECT widget.name FROM widget, part"
-                " WHERE part.widget_id = widget.id",
-                "SELECT widget.name FROM widget, part"
-                " WHERE part.widget_id = widget.id",
+                "SELECT widget.name FROM widget, part WHERE part.widget_id = widget.id",
+                "SELECT widget.name FROM widget, part WHERE part.widget_id = widget.id",
                 id="comma_join",
             ),
             param(
@@ -101,10 +99,8 @@ class CheckQueryTests(ParametrizedTestCase, SimpleTestCase):
                 id="derived",
             ),
             param(
-                "SELECT name FROM widget UNION ALL SELECT sku FROM part"
-                " ORDER BY name",
-                "SELECT name FROM widget UNION ALL SELECT sku FROM part"
-                " ORDER BY name",
+                "SELECT name FROM widget UNION ALL SELECT sku FROM part ORDER BY name",
+                "SELECT name FROM widget UNION ALL SELECT sku FROM part ORDER BY name",
                 id="union",
             ),
             param(
@@ -228,8 +224,7 @@ class CheckQueryTests(ParametrizedTestCase, SimpleTestCase):
             ),
             param(
                 "SELECT name FROM public.widget",
-                "public.widget isn't allowed: use unqualified names, without a"
-                " schema.",
+                "public.widget isn't allowed: use unqualified names, without a schema.",
                 id="schema",
             ),
             param(
@@ -573,7 +568,8 @@ class ListTablesNoneTests(SimpleTestCase):
 
 
 class PermissionsServerTests(ServerTestCase, TransactionTestCase):
-    # The tools see the tables the user has the view permission for.
+    # With the reader's view_permissions, the tools see the tables the user
+    # has the view permission for.
     url = "/sql-permissions-mcp"
 
     def setUp(self):
@@ -599,7 +595,7 @@ class PermissionsServerTests(ServerTestCase, TransactionTestCase):
         return result["structuredContent"]
 
     def tables(self) -> list[str]:
-        text = self.call("sql_schema")
+        text: str = self.call("sql_schema")
         listed = text.split("Tables:\n")[1].split("\n\n")[0]
         return listed.splitlines()
 
@@ -645,7 +641,7 @@ class PermissionsServerTests(ServerTestCase, TransactionTestCase):
 class PostgresCheckedTests(ServerTestCase, TestCase):
     # The checker in front of PostgreSQL, running the query as checked.
     url = "/sql-postgres-mcp"
-    databases = {"postgres", "reader"}
+    databases = {"postgres"}
 
     @classmethod
     def setUpClass(cls):

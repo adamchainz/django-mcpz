@@ -12,8 +12,6 @@ from typing import Annotated, Any
 
 import msgspec
 import msgspec.json
-from django.apps import apps
-from django.contrib.auth import get_permission_codename
 from django.core.exceptions import ImproperlyConfigured
 from django.db import connections
 from django.db.backends.base.base import BaseDatabaseWrapper
@@ -57,16 +55,6 @@ class SQLQueryParams(msgspec.Struct):
     ]
 
 
-def view_permission(request: HttpRequest, model: type[Model]) -> bool:
-    """
-    Whether the request's user may view the model, with its view permission,
-    as in the admin.
-    """
-    opts = model._meta
-    codename = get_permission_codename("view", opts)
-    return request.user.has_perm(f"{opts.app_label}.{codename}")
-
-
 def add_sql_tools(
     server: MCPServer,
     *,
@@ -77,30 +65,20 @@ def add_sql_tools(
     timeout: float = 10.0,
     name_prefix: str = "sql",
     permission: Callable[[HttpRequest], bool] | str | None = None,
-    can_view: Callable[[HttpRequest, type[Model]], bool] | None = None,
 ) -> None:
     """
     Add two tools to the server: one listing the reader's tables, or
     describing the columns of some, as SQL, and one running a read-only query
     against them.
 
-    Queries run through the reader's database alias. On PostgreSQL, that
-    logs in as a role that may only SELECT the reader's columns, as
-    maintained by the django_mcpz.sql app after every migrate, and the role
-    is the security boundary. On SQLite, an authorizer callback allows only
-    reads of those columns. Both add a single statement per call, a timeout,
-    and limits on the result.
-
-    Each call sees only the reader's tables whose models can_view allows, by
-    default view_permission(), those the user has the view permission for. Queries are checked
-    before they run, with django_mcpz_sqlcheck, which allows only SELECT
-    queries reading those tables' columns and calling a list of functions.
+    Each call sees the reader's tables, or with its view_permissions, those
+    the user has the view permission for. Queries are checked before they
+    run, with django_mcpz_sqlcheck, which allows only SELECT queries reading
+    those tables' columns and calling a list of functions, and that check is
+    the security boundary. Queries then run through the reader's database
+    alias, read-only, one statement per call, with a timeout and limits on
+    the result.
     """
-    if not apps.is_installed("django_mcpz.sql"):
-        raise ImproperlyConfigured(
-            "add_sql_tools() needs 'django_mcpz.sql' in INSTALLED_APPS, to"
-            " maintain the reader role's grants."
-        )
     connection = connections[reader.using]
     if max_rows < 1:
         raise ImproperlyConfigured("max_rows must be at least 1.")
@@ -109,13 +87,8 @@ def add_sql_tools(
     if timeout <= 0:
         raise ImproperlyConfigured("timeout must be positive.")
 
-    if can_view is None:
-        can_view = view_permission
     schema_name = f"{name_prefix}_schema"
     query_name = f"{name_prefix}_query"
-
-    def visible(request: HttpRequest) -> list[Table]:
-        return [table for table in reader.tables if can_view(request, table.model)]
 
     @server.tool(
         name=schema_name,
@@ -131,7 +104,7 @@ def add_sql_tools(
         permission=permission,
     )
     def sql_schema(request: HttpRequest, params: SQLSchemaParams) -> str:
-        tables = visible(request)
+        tables = reader.visible_tables(request)
         if not params.tables:
             return list_tables(reader, tables, context=context, schema_tool=schema_name)
         by_name = {table.name: table for table in tables}
@@ -169,7 +142,7 @@ def add_sql_tools(
         columns, rows, more = run_query(
             params.sql,
             reader=reader,
-            tables=visible(request),
+            tables=reader.visible_tables(request),
             max_rows=max_rows,
             max_size=max_size,
             timeout=timeout,
@@ -217,7 +190,7 @@ def run_query(
         )
     except QueryNotAllowed as exc:
         raise ToolError(f"Query not allowed: {exc}") from None
-    with query(connection, reader, sql, timeout) as cursor:
+    with query(connection, sql, timeout) as cursor:
         columns = [column[0] for column in cursor.description]
         rows, more = _fetch(cursor, max_rows, max_size)
     return columns, rows, more

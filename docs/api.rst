@@ -341,17 +341,16 @@ SQL tools
 
 As covered in :doc:`sql`.
 
-.. function:: add_sql_tools(server, *, reader, context=None, max_rows=1000, max_size=50000, timeout=10.0, name_prefix="sql", permission=None, can_view=None)
+.. function:: add_sql_tools(server, *, reader, context=None, max_rows=1000, max_size=50000, timeout=10.0, name_prefix="sql", permission=None)
 
     Add two tools to ``server``: ``<name_prefix>_schema``, listing the reader’s tables, or describing the columns of some, and ``<name_prefix>_query``, running one read-only query against them.
-    Each call sees only the tables ``can_view`` allows, and each query is checked before it runs, as covered in :ref:`sql-checking`.
+    Each query is checked before it runs, as covered in :ref:`sql-checking`.
 
     :param server:
         The :class:`~django_mcpz.server.MCPServer` to add the tools to.
 
     :param reader:
-        The :class:`~django_mcpz.sql.readers.SQLReader` to run queries as, through its database alias, listing the columns it can read.
-        On PostgreSQL, connecting with psycopg 3, the alias logs in as the reader role that the ``django_mcpz.sql`` app maintains.
+        The :class:`~django_mcpz.sql.readers.SQLReader` listing the columns queries can read, and the database alias they run through.
 
     :param context:
         Optional text shown at the top of the table list, for anything that applies across tables.
@@ -376,38 +375,26 @@ As covered in :doc:`sql`.
     :param permission:
         An optional permission for both tools, as for :meth:`~django_mcpz.server.MCPServer.tool`.
 
-    :param can_view:
-        A function taking the request and a model of one of the reader’s tables, returning whether the tools may show and query that table for the request.
-        By default, :func:`view_permission`, allowing the tables whose models the user has the view permission for.
-
-    Raises ``ImproperlyConfigured`` if the ``django_mcpz.sql`` app isn’t installed, or a limit is out of range.
-
-.. function:: view_permission(request, model)
-
-    Whether the request’s user has ``model``’s view permission, ``<app_label>.view_<model_name>``, as the admin checks.
-    The default ``can_view`` for :func:`add_sql_tools`.
+    Raises ``ImproperlyConfigured`` if a limit is out of range.
 
 .. currentmodule:: django_mcpz.sql.readers
 
-.. class:: SQLReader(*, tables, using="default", grantor="default")
+.. class:: SQLReader(*, tables, using="default", view_permissions=False)
 
-    What the SQL tools can read, as covered in :doc:`sql`.
-    On PostgreSQL, the reader’s alias logs in as its own role, and after every ``migrate``, the ``django_mcpz.sql`` app makes the role able to ``SELECT`` exactly the listed columns, and nothing else, finding readers by importing each app’s ``mcp`` module.
-    On SQLite, the tools allow reading only the listed columns as each query runs.
+    What the SQL tools can read, as covered in :doc:`sql`: the outer limit on every query, which the tools check each query against before running it.
 
     :param tables:
-        The columns the role can read, as a dict of models, for tables or views, to lists of the names of the fields to expose, such as ``{Order: ["id", "pizza_id", "quantity"]}``.
+        The columns queries can read, as a dict of models, for tables or views, to lists of the names of the fields to expose, such as ``{Order: ["id", "pizza_id", "quantity"]}``.
         Fields can be named by their name or attribute name, and must be columns of the model’s own table.
         The models’ and fields’ documentation drives the schema tool.
 
     :param using:
-        The database alias the tools query through, which, on PostgreSQL, logs in as the reader’s role.
+        The database alias the tools query through, on PostgreSQL, with psycopg 3, or SQLite.
 
-    :param grantor:
-        On PostgreSQL, the database alias whose role creates and grants to the reader’s role, after that alias is migrated.
-        Unused on SQLite.
+    :param view_permissions:
+        Whether to limit each call to the tables whose models its user has the view permission for, as covered in :doc:`sql`.
 
-    Raises ``ImproperlyConfigured`` if an alias isn’t in ``DATABASES``, the database isn’t PostgreSQL or SQLite, ``using`` and ``grantor`` are the same on PostgreSQL, ``tables`` names a field that isn’t a column, or another reader for the same alias lists different columns.
+    Raises ``ImproperlyConfigured`` if ``using`` isn’t in ``DATABASES``, the database isn’t PostgreSQL or SQLite, or ``tables`` names a field that isn’t a column.
 
     Readers are immutable.
 
