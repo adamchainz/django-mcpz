@@ -14,12 +14,6 @@ conflicts = [[
     { package = "django-mcpz", group = "django61" },
 ]]
 
-[manifest]
-members = [
-    "django-mcpz",
-    "django-mcpz-sqlcheck",
-]
-
 [[package]]
 name = "accessible-pygments"
 version = "0.0.5"
@@ -643,11 +637,6 @@ dependencies = [
     { name = "msgspec" },
 ]
 
-[package.optional-dependencies]
-sql = [
-    { name = "django-mcpz-sqlcheck" },
-]
-
 [package.dev-dependencies]
 django52 = [
     { name = "django", version = "5.2.18", source = { registry = "https://pypi.org/simple" } },
@@ -670,7 +659,6 @@ example = [
 ]
 test = [
     { name = "coverage" },
-    { name = "django-mcpz-sqlcheck" },
     { name = "mcp" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pytest" },
@@ -684,11 +672,9 @@ test = [
 requires-dist = [
     { name = "asgiref", specifier = ">=3.6" },
     { name = "django", specifier = ">=5.2" },
-    { name = "django-mcpz-sqlcheck", marker = "extra == 'sql'", editable = "sqlcheck" },
     { name = "django-msgspec", specifier = ">=1" },
     { name = "msgspec", specifier = ">=0.20" },
 ]
-provides-extras = ["sql"]
 
 [package.metadata.requires-dev]
 django52 = [{ name = "django", specifier = ">=5.2a1,<6" }]
@@ -702,7 +688,6 @@ docs = [
 example = [{ name = "pillow", specifier = ">=10.1" }]
 test = [
     { name = "coverage", extras = ["toml"] },
-    { name = "django-mcpz-sqlcheck", editable = "sqlcheck" },
     { name = "mcp", specifier = ">=2,<3" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.1" },
     { name = "pytest", specifier = ">=9" },
@@ -711,11 +696,6 @@ test = [
     { name = "time-machine" },
     { name = "unittest-parametrize" },
 ]
-
-[[package]]
-name = "django-mcpz-sqlcheck"
-version = "0.1.0"
-source = { editable = "sqlcheck" }
 
 [[package]]
 name = "django-msgspec"

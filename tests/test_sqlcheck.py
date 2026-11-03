@@ -5,9 +5,9 @@ from typing import Any
 import pytest
 from django.contrib.auth.models import Permission, User
 from django.test import SimpleTestCase, TestCase, TransactionTestCase
-from django_mcpz_sqlcheck import QueryNotAllowed, check_query
 from unittest_parametrize import ParametrizedTestCase, param, parametrize
 
+from django_mcpz._sqlcheck import QueryNotAllowed, check_query
 from django_mcpz.server import ToolError
 from django_mcpz.sql.queries import FUNCTIONS
 from django_mcpz.sql.tools import list_tables, run_query

@@ -17,13 +17,7 @@ Before running each query, the tools parse it and check it reads only the tables
 Setup
 -----
 
-1. Install django-mcpz with the ``sql`` extra, which adds the query checker, a compiled Rust extension:
-
-   .. code-block:: sh
-
-       python -m pip install 'django-mcpz[sql]'
-
-2. Define a :class:`~django_mcpz.sql.readers.SQLReader` alongside your MCP server, in your app’s ``mcp`` module, listing the columns queries may read, as a dict of models to field names:
+1. Define a :class:`~django_mcpz.sql.readers.SQLReader` alongside your MCP server, in your app’s ``mcp`` module, listing the columns queries may read, as a dict of models to field names:
 
    .. code-block:: python
 
@@ -103,7 +97,7 @@ Setup
    .. |db_comment| replace:: ``db_comment``
    __ https://docs.djangoproject.com/en/stable/ref/models/fields/#db-comment
 
-3. Add the tools to your server, with the reader:
+2. Add the tools to your server, with the reader:
 
    .. code-block:: python
 
@@ -143,7 +137,7 @@ Users without any see an empty table list.
 Checking queries
 ----------------
 
-``sql_query`` checks each query before it runs, with the ``django-mcpz-sqlcheck`` package, which parses it with `sqlparser <https://github.com/apache/datafusion-sqlparser-rs>`__.
+``sql_query`` checks each query before it runs, with a Rust extension included in django-mcpz, which parses it with `sqlparser <https://github.com/apache/datafusion-sqlparser-rs>`__.
 The checker is conservative, allowing only what it fully understands:
 
 * One ``SELECT``, optionally with ``WITH``, and ``UNION``, ``INTERSECT``, or ``EXCEPT``.

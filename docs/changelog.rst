@@ -7,7 +7,7 @@ Unreleased
 
 * Add SQL tools, whose ``add_sql_tools()`` adds tools letting an LLM run read-only SQL queries against chosen columns of tables and views, plus describe them, on PostgreSQL or SQLite.
   A ``SQLReader``, defined alongside the tools, lists those columns, and optionally limits each user to the tables they have the view permission for.
-  Queries are checked before they run by ``django-mcpz-sqlcheck``, a Rust extension, installed with the ``sql`` extra.
+  Queries are checked before they run by a Rust extension, using `sqlparser <https://github.com/apache/datafusion-sqlparser-rs>`__, so django-mcpz now ships compiled wheels.
   See :doc:`sql`.
 
   `PR #42 <https://github.com/adamchainz/django-mcpz/pull/42>`__.

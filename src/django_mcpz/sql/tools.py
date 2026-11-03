@@ -18,9 +18,9 @@ from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.backends.utils import CursorWrapper
 from django.db.models import CompositePrimaryKey, Field, Model
 from django.http import HttpRequest
-from django_mcpz_sqlcheck import QueryNotAllowed, check_query
 from django_msgspec import enc_hook as django_enc_hook
 
+from django_mcpz._sqlcheck import QueryNotAllowed, check_query
 from django_mcpz.server import MCPServer, ToolError
 from django_mcpz.sql.queries import FUNCTIONS, get_query
 from django_mcpz.sql.readers import SQLReader, Table, db_type, quote_name
@@ -73,11 +73,11 @@ def add_sql_tools(
 
     Each call sees the reader's tables, or with its view_permissions, those
     the user has the view permission for. Queries are checked before they
-    run, with django_mcpz_sqlcheck, which allows only SELECT queries reading
-    those tables' columns and calling a list of functions, and that check is
-    the security boundary. Queries then run through the reader's database
-    alias, read-only, one statement per call, with a timeout and limits on
-    the result.
+    run, with the django_mcpz._sqlcheck Rust extension, which allows only
+    SELECT queries reading those tables' columns and calling a list of
+    functions, and that check is the security boundary. Queries then run
+    through the reader's database alias, read-only, one statement per call,
+    with a timeout and limits on the result.
     """
     connection = connections[reader.using]
     if max_rows < 1:
