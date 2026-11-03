@@ -646,8 +646,7 @@ class PostgresServerTests(ServerTestCase, TestCase):
         assert self.query("DELETE FROM tests_widget") == (
             'Query error: syntax error at or near "DELETE"\n'
             "LINE 1: DELETE FROM tests_widget\n"
-            "        ^\n"
-            "Only a single SELECT statement is allowed."
+            "        ^"
         )
 
     def test_syntax_error(self):
@@ -687,9 +686,7 @@ class PostgresServerTests(ServerTestCase, TestCase):
 
     def test_multiple_statements(self):
         assert self.query("SELECT 1; DELETE FROM tests_widget") == (
-            "Query error: cannot insert multiple commands into a prepared"
-            " statement\n"
-            "Only a single SELECT statement is allowed."
+            "Query error: cannot insert multiple commands into a prepared statement"
         )
 
     def test_writing_with(self):
@@ -867,10 +864,12 @@ class SQLiteServerTests(ServerTestCase, TransactionTestCase):
         assert Widget.objects.count() == 3
 
     def test_multiple_statements(self):
-        assert self.query("SELECT 1; DELETE FROM tests_widget") == (
-            "Query error: You can only execute one statement at a time.\n"
-            "Only a single SELECT statement is allowed."
-        )
+        # Python's sqlite3 refuses, as an unexpected error, since the checker
+        # allows only one statement.
+        with self.assertLogs("django_mcpz", "ERROR"):
+            assert self.query("SELECT 1; DELETE FROM tests_widget") == (
+                "Tool 'sql_query' failed unexpectedly."
+            )
         assert Widget.objects.count() == 3
 
     def test_syntax_error(self):

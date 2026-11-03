@@ -18,8 +18,6 @@ from django.db.backends.utils import CursorWrapper
 
 from django_mcpz.server import ToolError
 
-ONLY_SELECT = "Only a single SELECT statement is allowed."
-
 Query = Callable[
     [BaseDatabaseWrapper, str, float],
     contextlib.AbstractContextManager[CursorWrapper],
@@ -54,11 +52,6 @@ def _timeout_error(timeout: float) -> ToolError:
     )
 
 
-def _looks_like_query(sql: str) -> bool:
-    words = sql.lstrip("(").split(None, 1)
-    return bool(words) and words[0].lower() in {"select", "with", "values", "table"}
-
-
 # PostgreSQL
 
 # SQLSTATE classes of errors in the query itself, which the LLM can fix.
@@ -79,7 +72,6 @@ _QUERY_ERROR_CLASSES = frozenset(
     }
 )
 _QUERY_CANCELED = "57014"
-_SYNTAX_ERROR = "42601"
 
 
 @contextlib.contextmanager
@@ -196,10 +188,6 @@ def _postgresql_error(
     if sqlstate is None or sqlstate[:2] not in _QUERY_ERROR_CLASSES:
         return exc
     message = _postgresql_message(cause, sql, declare_length)
-    if sqlstate == _SYNTAX_ERROR and (
-        "multiple commands" in message or not _looks_like_query(sql)
-    ):
-        message += f"\n{ONLY_SELECT}"
     return ToolError(f"Query error: {message}")
 
 
@@ -307,9 +295,6 @@ def _sqlite_error(exc: DatabaseError, sql: str, timeout: float) -> Exception:
     message = str(cause)
     if name == "SQLITE_INTERRUPT":
         return _timeout_error(timeout)
-    if name is None and "one statement at a time" in message:
-        # From the sqlite3 module, not SQLite.
-        return ToolError(f"Query error: {message}\n{ONLY_SELECT}")
     if name not in _SQLITE_QUERY_ERRORS:
         return exc
     return ToolError(f"Query error: {message}")

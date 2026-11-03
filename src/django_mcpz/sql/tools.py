@@ -179,7 +179,7 @@ def run_query(
     if not sql:
         raise ToolError("The SQL is empty.")
     try:
-        sql = check_query(
+        checked = check_query(
             sql,
             dialect=connection.vendor,
             tables={
@@ -190,9 +190,18 @@ def run_query(
         )
     except QueryNotAllowed as exc:
         raise ToolError(f"Query not allowed: {exc}") from None
-    with query(connection, sql, timeout) as cursor:
-        columns = [column[0] for column in cursor.description]
-        rows, more = _fetch(cursor, max_rows, max_size)
+    try:
+        with query(connection, checked, timeout) as cursor:
+            columns = [column[0] for column in cursor.description]
+            rows, more = _fetch(cursor, max_rows, max_size)
+    except ToolError as exc:
+        # Errors are about the query as checked, which can differ from the
+        # LLM's, such as without comments, so show it.
+        if str(exc).startswith("Query error:") and checked != sql:
+            raise ToolError(
+                f"{exc}\nThe query, as checked and run:\n{checked}"
+            ) from None
+        raise
     return columns, rows, more
 
 

@@ -222,6 +222,7 @@ Rows are left out past ``max_rows``, or when the result would exceed ``max_size`
 Long values are shortened too, to a fair share of ``max_size``, so a single huge value can’t flood the LLM’s context.
 
 Errors in the query, such as syntax errors and checks it fails, are returned to the LLM as tool errors, so it can correct itself.
+Database errors are about the query as checked, which can differ from the LLM’s, such as without comments, so when it does, the error includes it.
 
 Security
 --------
@@ -233,7 +234,7 @@ On top of the checker, the tools limit what a query can do beyond reading:
 
 * Each query runs on a fresh connection to the alias’s database, closed afterwards.
   So it sees only committed data, not uncommitted changes in the current request’s transaction, and leaves your app’s own connection untouched.
-  It costs a new database connection per query.
+  It costs a new database connection per query, which on PostgreSQL can take tens of milliseconds, more over TLS, and adds a server process for the query’s duration.
   Hooks you add to the alias’s connection with |execute_wrapper|__ apply to it too.
 
 * On PostgreSQL, the query runs in a ``READ ONLY`` transaction, which is never committed.

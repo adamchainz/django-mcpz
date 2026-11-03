@@ -664,6 +664,23 @@ class PostgresCheckedTests(ServerTestCase, TestCase):
             "select name from tests_widget_view where price < 1 -- cheap"
         ) == {"columns": ["name"], "rows": [["Doohickey"]]}
 
+    def test_error_shows_checked_query(self):
+        # The query as checked, without the comment, which the error's
+        # position refers to.
+        assert self.query(
+            "-- Cast it.\nselect cast(name as integer) from tests_widget_view"
+            " where name = 'Gizmo'"
+        ) == (
+            'Query error: invalid input syntax for type integer: "Gizmo"\n'
+            "The query, as checked and run:\n"
+            "SELECT CAST(name AS INTEGER) FROM tests_widget_view WHERE name = 'Gizmo'"
+        )
+
+    def test_error_unchanged_query(self):
+        assert self.query(
+            "SELECT CAST(name AS INTEGER) FROM tests_widget_view WHERE name = 'Gizmo'"
+        ) == ('Query error: invalid input syntax for type integer: "Gizmo"')
+
     def test_not_allowed(self):
         assert self.query("SELECT pg_sleep(5)") == (
             "Query not allowed: The function pg_sleep() isn't allowed."
