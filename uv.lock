@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -13,6 +13,12 @@ conflicts = [[
     { package = "django-mcpz", group = "django60" },
     { package = "django-mcpz", group = "django61" },
 ]]
+
+[manifest]
+members = [
+    "django-mcpz",
+    "django-mcpz-sqlcheck",
+]
 
 [[package]]
 name = "accessible-pygments"
@@ -50,7 +56,7 @@ version = "4.15.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "idna" },
-    { name = "typing-extensions", marker = "python_full_version < '3.15'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.15' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a9/d2/f4d173e22df740bc37b1db102b386ba719b66e95b0f0d751f556b387e6d2/anyio-4.15.1.tar.gz", hash = "sha256:9f28306018cbd6d329e64a36d58256edff76dd996fe423bc957326e578b82a94", size = 276966, upload-time = "2026-09-05T10:42:39.44Z" }
 wheels = [
@@ -89,8 +95,8 @@ name = "beautifulsoup4"
 version = "4.15.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "soupsieve", version = "2.10", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11.5'" },
-    { name = "soupsieve", version = "3.0.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11.5'" },
+    { name = "soupsieve", version = "2.10", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11.5' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "soupsieve", version = "3.0.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11.5' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
     { name = "typing-extensions" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/43/65/318323f98dbee45d42dff61d8f047181bc6f2268a9068cfad035a46be5af/beautifulsoup4-4.15.0.tar.gz", hash = "sha256:288e3ca7d54b06f2ac191970bc275c1939cb46d450b255bf6718b04aa37ab4f7", size = 632571, upload-time = "2026-06-07T16:44:20.453Z" }
@@ -112,7 +118,7 @@ name = "cffi"
 version = "2.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pycparser", marker = "implementation_name != 'PyPy'" },
+    { name = "pycparser", marker = "implementation_name != 'PyPy' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/9e/ef/008a1939e372c06329a3fce4279c02f328488f3526744906eeec3da7ad5f/cffi-2.1.1.tar.gz", hash = "sha256:dd31f52ea1086513bb9df30f8fcee9b8918323ae067a3d5b78bc826a000712be", size = 530807, upload-time = "2026-08-03T21:21:18.939Z" }
 wheels = [
@@ -501,7 +507,7 @@ name = "cryptography"
 version = "50.0.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cffi", marker = "platform_python_implementation != 'PyPy'" },
+    { name = "cffi", marker = "platform_python_implementation != 'PyPy' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/9d/af/182eb91b0df3fe75c4d9f26fe70684569566745f6ba7e5c9c73a862c5252/cryptography-50.0.2.tar.gz", hash = "sha256:7b46165bb56eb4704e2eaaf86f3c940d19154535d9b0ca7d6d590b04060e00d5", size = 880623, upload-time = "2026-09-30T15:30:04.884Z" }
 wheels = [
@@ -570,16 +576,16 @@ name = "django"
 version = "5.2.18"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.11.5' and python_full_version < '3.12'",
-    "python_full_version < '3.11.5'",
     "python_full_version >= '3.14'",
     "python_full_version == '3.13.*'",
     "python_full_version == '3.12.*'",
+    "python_full_version >= '3.11.5' and python_full_version < '3.12'",
+    "python_full_version < '3.11.5'",
 ]
 dependencies = [
     { name = "asgiref", marker = "python_full_version < '3.12' or extra == 'group-11-django-mcpz-django52' or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
     { name = "sqlparse", marker = "python_full_version < '3.12' or extra == 'group-11-django-mcpz-django52' or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
-    { name = "tzdata", marker = "(python_full_version < '3.12' and sys_platform == 'win32') or (sys_platform == 'win32' and extra == 'group-11-django-mcpz-django52') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "tzdata", marker = "(python_full_version < '3.12' and sys_platform == 'win32') or (python_full_version >= '3.12' and extra != 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61') or (sys_platform == 'win32' and extra == 'group-11-django-mcpz-django52') or (sys_platform != 'win32' and extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (sys_platform != 'win32' and extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (sys_platform != 'win32' and extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/85/fe/79e692b430c7721bf4b812c328bfe687e73e3f28f56611a6a18a97e887cc/django-5.2.18.tar.gz", hash = "sha256:461c5dd06d2ea16bd5ca37d3f46e4def1d6b0fe7588c6f4e2119517bb0af8b2d", size = 10910238, upload-time = "2026-10-06T13:01:09.371Z" }
 wheels = [
@@ -596,9 +602,9 @@ resolution-markers = [
     "python_full_version == '3.12.*'",
 ]
 dependencies = [
-    { name = "asgiref", marker = "(python_full_version >= '3.12' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
-    { name = "sqlparse", marker = "(python_full_version >= '3.12' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
-    { name = "tzdata", marker = "(python_full_version >= '3.12' and sys_platform == 'win32' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "asgiref", marker = "(python_full_version >= '3.12' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sqlparse", marker = "(python_full_version >= '3.12' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "tzdata", marker = "(python_full_version >= '3.12' and sys_platform == 'win32' and extra == 'group-11-django-mcpz-django60') or (python_full_version < '3.12' and extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61') or (sys_platform != 'win32' and extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/13/1f/e4c69ec67bedee10428875a44b8b4554d0448a264b50298bfa63d2162708/django-6.0.9.tar.gz", hash = "sha256:8ce037c971f421cfb47d38c097ca233a8f6dd42d9e9501a37e02dd7d08c5cb3f", size = 10955325, upload-time = "2026-10-06T12:57:57.479Z" }
 wheels = [
@@ -631,10 +637,15 @@ source = { editable = "." }
 dependencies = [
     { name = "asgiref" },
     { name = "django", version = "5.2.18", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or extra == 'group-11-django-mcpz-django52' or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
-    { name = "django", version = "6.0.9", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "django", version = "6.0.9", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61')" },
     { name = "django", version = "6.1.2", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra != 'group-11-django-mcpz-django52' and extra != 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
     { name = "django-msgspec" },
     { name = "msgspec" },
+]
+
+[package.optional-dependencies]
+sql = [
+    { name = "django-mcpz-sqlcheck" },
 ]
 
 [package.dev-dependencies]
@@ -649,9 +660,9 @@ django61 = [
 ]
 docs = [
     { name = "furo" },
-    { name = "sphinx", version = "9.0.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "sphinx", version = "9.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.12.*'" },
-    { name = "sphinx", version = "9.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
+    { name = "sphinx", version = "9.0.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinx", version = "9.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.12.*' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinx", version = "9.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
     { name = "sphinx-copybutton" },
 ]
 example = [
@@ -659,6 +670,7 @@ example = [
 ]
 test = [
     { name = "coverage" },
+    { name = "django-mcpz-sqlcheck" },
     { name = "mcp" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pytest" },
@@ -672,9 +684,11 @@ test = [
 requires-dist = [
     { name = "asgiref", specifier = ">=3.6" },
     { name = "django", specifier = ">=5.2" },
+    { name = "django-mcpz-sqlcheck", marker = "extra == 'sql'", editable = "sqlcheck" },
     { name = "django-msgspec", specifier = ">=1" },
     { name = "msgspec", specifier = ">=0.20" },
 ]
+provides-extras = ["sql"]
 
 [package.metadata.requires-dev]
 django52 = [{ name = "django", specifier = ">=5.2a1,<6" }]
@@ -688,6 +702,7 @@ docs = [
 example = [{ name = "pillow", specifier = ">=10.1" }]
 test = [
     { name = "coverage", extras = ["toml"] },
+    { name = "django-mcpz-sqlcheck", editable = "sqlcheck" },
     { name = "mcp", specifier = ">=2,<3" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.1" },
     { name = "pytest", specifier = ">=9" },
@@ -698,12 +713,17 @@ test = [
 ]
 
 [[package]]
+name = "django-mcpz-sqlcheck"
+version = "0.1.0"
+source = { editable = "sqlcheck" }
+
+[[package]]
 name = "django-msgspec"
 version = "1.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "django", version = "5.2.18", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or extra == 'group-11-django-mcpz-django52' or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
-    { name = "django", version = "6.0.9", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "django", version = "6.0.9", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61')" },
     { name = "django", version = "6.1.2", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra != 'group-11-django-mcpz-django52' and extra != 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
     { name = "msgspec" },
 ]
@@ -747,9 +767,9 @@ dependencies = [
     { name = "accessible-pygments" },
     { name = "beautifulsoup4" },
     { name = "pygments" },
-    { name = "sphinx", version = "9.0.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "sphinx", version = "9.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.12.*'" },
-    { name = "sphinx", version = "9.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
+    { name = "sphinx", version = "9.0.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinx", version = "9.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.12.*' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinx", version = "9.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
     { name = "sphinx-basic-ng" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ec/20/5f5ad4da6a5a27c80f2ed2ee9aee3f9e36c66e56e21c00fde467b2f8f88f/furo-2025.12.19.tar.gz", hash = "sha256:188d1f942037d8b37cd3985b955839fea62baa1730087dc29d157677c857e2a7", size = 1661473, upload-time = "2025-12-19T17:34:40.889Z" }
@@ -784,12 +804,12 @@ name = "httpx2"
 version = "2.16.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "anyio", marker = "sys_platform != 'emscripten'" },
-    { name = "httpcore2", marker = "sys_platform != 'emscripten'" },
-    { name = "httpx2-jsfetch", marker = "python_full_version >= '3.12' and sys_platform == 'emscripten'" },
+    { name = "anyio", marker = "sys_platform != 'emscripten' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "httpcore2", marker = "sys_platform != 'emscripten' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "httpx2-jsfetch", marker = "(python_full_version >= '3.12' and sys_platform == 'emscripten') or (python_full_version < '3.12' and extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (python_full_version < '3.12' and extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (python_full_version < '3.12' and extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61') or (sys_platform != 'emscripten' and extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (sys_platform != 'emscripten' and extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (sys_platform != 'emscripten' and extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
     { name = "idna" },
-    { name = "truststore", marker = "sys_platform != 'emscripten'" },
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "truststore", marker = "sys_platform != 'emscripten' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/43/73/5ca2cedf5e4e50423d1c258877865a6b62793633b561c58499f8aeb33b7e/httpx2-2.16.0.tar.gz", hash = "sha256:0d54c98128e8f2ff7fbbde0fca8c359e5f032edeaaaac443cdb7f31f685bcd7f", size = 103116, upload-time = "2026-10-21T07:09:46.348Z" }
 wheels = [
@@ -1012,12 +1032,12 @@ dependencies = [
     { name = "pydantic" },
     { name = "pyjwt", extra = ["crypto"] },
     { name = "python-multipart" },
-    { name = "pywin32", marker = "sys_platform == 'win32'" },
+    { name = "pywin32", marker = "sys_platform == 'win32' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
     { name = "sse-starlette" },
     { name = "starlette" },
     { name = "typing-extensions" },
     { name = "typing-inspection" },
-    { name = "uvicorn", marker = "sys_platform != 'emscripten'" },
+    { name = "uvicorn", marker = "sys_platform != 'emscripten' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/9d/8d/e0d339616f4810e9051d4aba6887afab289ab1f81875fe908b606cdfd0e3/mcp-2.3.0.tar.gz", hash = "sha256:8b147a50441cf059dc88c684e0aeed3687f0aa0f39c6cde7b90330effd2b34d8", size = 4171955, upload-time = "2026-10-02T22:06:56.091Z" }
 wheels = [
@@ -1501,7 +1521,7 @@ name = "pytest"
 version = "9.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
     { name = "iniconfig" },
     { name = "packaging" },
     { name = "pluggy" },
@@ -1574,7 +1594,7 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
     { name = "rpds-py" },
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/22/f5/df4e9027acead3ecc63e50fe1e36aca1523e1719559c499951bb4b53188f/referencing-0.37.0.tar.gz", hash = "sha256:44aefc3142c5b842538163acb373e24cce6632bd54bdb01b21ad5863489f50d8", size = 78036, upload-time = "2025-10-13T15:30:48.871Z" }
 wheels = [
@@ -1785,23 +1805,23 @@ resolution-markers = [
     "python_full_version < '3.11.5'",
 ]
 dependencies = [
-    { name = "alabaster" },
-    { name = "babel" },
-    { name = "colorama", marker = "sys_platform == 'win32'" },
-    { name = "docutils", version = "0.22.4", source = { registry = "https://pypi.org/simple" } },
-    { name = "imagesize" },
-    { name = "jinja2" },
-    { name = "packaging" },
-    { name = "pygments" },
-    { name = "requests" },
-    { name = "roman-numerals" },
-    { name = "snowballstemmer" },
-    { name = "sphinxcontrib-applehelp" },
-    { name = "sphinxcontrib-devhelp" },
-    { name = "sphinxcontrib-htmlhelp" },
-    { name = "sphinxcontrib-jsmath" },
-    { name = "sphinxcontrib-qthelp" },
-    { name = "sphinxcontrib-serializinghtml" },
+    { name = "alabaster", marker = "python_full_version < '3.12' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "babel", marker = "python_full_version < '3.12' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "colorama", marker = "(python_full_version < '3.12' and sys_platform == 'win32') or (python_full_version >= '3.12' and extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (python_full_version >= '3.12' and extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (python_full_version >= '3.12' and extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61') or (sys_platform != 'win32' and extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (sys_platform != 'win32' and extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (sys_platform != 'win32' and extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "docutils", version = "0.22.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "imagesize", marker = "python_full_version < '3.12' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "jinja2", marker = "python_full_version < '3.12' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "packaging", marker = "python_full_version < '3.12' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "pygments", marker = "python_full_version < '3.12' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "requests", marker = "python_full_version < '3.12' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "roman-numerals", marker = "python_full_version < '3.12' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "snowballstemmer", marker = "python_full_version < '3.12' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinxcontrib-applehelp", marker = "python_full_version < '3.12' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinxcontrib-devhelp", marker = "python_full_version < '3.12' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinxcontrib-htmlhelp", marker = "python_full_version < '3.12' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinxcontrib-jsmath", marker = "python_full_version < '3.12' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinxcontrib-qthelp", marker = "python_full_version < '3.12' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinxcontrib-serializinghtml", marker = "python_full_version < '3.12' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/42/50/a8c6ccc36d5eacdfd7913ddccd15a9cee03ecafc5ee2bc40e1f168d85022/sphinx-9.0.4.tar.gz", hash = "sha256:594ef59d042972abbc581d8baa577404abe4e6c3b04ef61bd7fc2acbd51f3fa3", size = 8710502, upload-time = "2025-12-04T07:45:27.343Z" }
 wheels = [
@@ -1816,23 +1836,23 @@ resolution-markers = [
     "python_full_version == '3.12.*'",
 ]
 dependencies = [
-    { name = "alabaster" },
-    { name = "babel" },
-    { name = "colorama", marker = "sys_platform == 'win32'" },
-    { name = "docutils", version = "0.22.4", source = { registry = "https://pypi.org/simple" } },
-    { name = "imagesize" },
-    { name = "jinja2" },
-    { name = "packaging" },
-    { name = "pygments" },
-    { name = "requests" },
-    { name = "roman-numerals" },
-    { name = "snowballstemmer" },
-    { name = "sphinxcontrib-applehelp" },
-    { name = "sphinxcontrib-devhelp" },
-    { name = "sphinxcontrib-htmlhelp" },
-    { name = "sphinxcontrib-jsmath" },
-    { name = "sphinxcontrib-qthelp" },
-    { name = "sphinxcontrib-serializinghtml" },
+    { name = "alabaster", marker = "python_full_version == '3.12.*' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "babel", marker = "python_full_version == '3.12.*' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "colorama", marker = "(python_full_version == '3.12.*' and sys_platform == 'win32') or (python_full_version != '3.12.*' and extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (python_full_version != '3.12.*' and extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (python_full_version != '3.12.*' and extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61') or (sys_platform != 'win32' and extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (sys_platform != 'win32' and extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (sys_platform != 'win32' and extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "docutils", version = "0.22.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.12.*' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "imagesize", marker = "python_full_version == '3.12.*' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "jinja2", marker = "python_full_version == '3.12.*' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "packaging", marker = "python_full_version == '3.12.*' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "pygments", marker = "python_full_version == '3.12.*' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "requests", marker = "python_full_version == '3.12.*' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "roman-numerals", marker = "python_full_version == '3.12.*' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "snowballstemmer", marker = "python_full_version == '3.12.*' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinxcontrib-applehelp", marker = "python_full_version == '3.12.*' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinxcontrib-devhelp", marker = "python_full_version == '3.12.*' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinxcontrib-htmlhelp", marker = "python_full_version == '3.12.*' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinxcontrib-jsmath", marker = "python_full_version == '3.12.*' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinxcontrib-qthelp", marker = "python_full_version == '3.12.*' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinxcontrib-serializinghtml", marker = "python_full_version == '3.12.*' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/fc/73/567727fc8c8d85bc3adc88a246e12937cfda8d565cf1d80e85bceaa61fe5/sphinx-9.1.1.tar.gz", hash = "sha256:48b627f02908f22c601b3ba9c7b17265b4f315dd05c8bc64cd4da41183f44fbc", size = 8725638, upload-time = "2026-10-20T00:41:13.96Z" }
 wheels = [
@@ -1848,23 +1868,23 @@ resolution-markers = [
     "python_full_version == '3.13.*'",
 ]
 dependencies = [
-    { name = "alabaster" },
-    { name = "babel" },
-    { name = "colorama", marker = "sys_platform == 'win32'" },
-    { name = "docutils", version = "0.23", source = { registry = "https://pypi.org/simple" } },
-    { name = "imagesize" },
-    { name = "jinja2" },
-    { name = "packaging" },
-    { name = "pygments" },
-    { name = "requests" },
-    { name = "roman-numerals" },
-    { name = "snowballstemmer" },
-    { name = "sphinxcontrib-applehelp" },
-    { name = "sphinxcontrib-devhelp" },
-    { name = "sphinxcontrib-htmlhelp" },
-    { name = "sphinxcontrib-jsmath" },
-    { name = "sphinxcontrib-qthelp" },
-    { name = "sphinxcontrib-serializinghtml" },
+    { name = "alabaster", marker = "python_full_version >= '3.13' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "babel", marker = "python_full_version >= '3.13' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "colorama", marker = "(python_full_version >= '3.13' and sys_platform == 'win32') or (python_full_version < '3.13' and extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (python_full_version < '3.13' and extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (python_full_version < '3.13' and extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61') or (sys_platform != 'win32' and extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (sys_platform != 'win32' and extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (sys_platform != 'win32' and extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "docutils", version = "0.23", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "imagesize", marker = "python_full_version >= '3.13' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "jinja2", marker = "python_full_version >= '3.13' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "packaging", marker = "python_full_version >= '3.13' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "pygments", marker = "python_full_version >= '3.13' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "requests", marker = "python_full_version >= '3.13' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "roman-numerals", marker = "python_full_version >= '3.13' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "snowballstemmer", marker = "python_full_version >= '3.13' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinxcontrib-applehelp", marker = "python_full_version >= '3.13' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinxcontrib-devhelp", marker = "python_full_version >= '3.13' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinxcontrib-htmlhelp", marker = "python_full_version >= '3.13' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinxcontrib-jsmath", marker = "python_full_version >= '3.13' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinxcontrib-qthelp", marker = "python_full_version >= '3.13' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinxcontrib-serializinghtml", marker = "python_full_version >= '3.13' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/64/d4/413466f0be8b1cb0e3e43893a148b96d7462d0923d82b4166b21afc5f30c/sphinx-9.2.0.tar.gz", hash = "sha256:90470459f3cab15d9dfed146c71cf77694b0445df17b2e0e69059cb9f7fc9ee4", size = 8782438, upload-time = "2026-10-21T00:05:15.019Z" }
 wheels = [
@@ -1876,9 +1896,9 @@ name = "sphinx-basic-ng"
 version = "1.0.0b2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "sphinx", version = "9.0.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "sphinx", version = "9.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.12.*'" },
-    { name = "sphinx", version = "9.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
+    { name = "sphinx", version = "9.0.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinx", version = "9.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.12.*' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinx", version = "9.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/98/0b/a866924ded68efec7a1759587a4e478aec7559d8165fac8b2ad1c0e774d6/sphinx_basic_ng-1.0.0b2.tar.gz", hash = "sha256:9ec55a47c90c8c002b5960c57492ec3021f5193cb26cebc2dc4ea226848651c9", size = 20736, upload-time = "2023-07-08T18:40:54.166Z" }
 wheels = [
@@ -1890,9 +1910,9 @@ name = "sphinx-copybutton"
 version = "0.5.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "sphinx", version = "9.0.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "sphinx", version = "9.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.12.*'" },
-    { name = "sphinx", version = "9.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
+    { name = "sphinx", version = "9.0.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinx", version = "9.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.12.*' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
+    { name = "sphinx", version = "9.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/fc/2b/a964715e7f5295f77509e59309959f4125122d648f86b4fe7d70ca1d882c/sphinx-copybutton-0.5.2.tar.gz", hash = "sha256:4cf17c82fb9646d1bc9ca92ac280813a3b605d8c421225fd9913154103ee1fbd", size = 23039, upload-time = "2023-04-14T08:10:22.998Z" }
 wheels = [
@@ -1981,7 +2001,7 @@ version = "1.10.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13' or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django60') or (extra == 'group-11-django-mcpz-django52' and extra == 'group-11-django-mcpz-django61') or (extra == 'group-11-django-mcpz-django60' and extra == 'group-11-django-mcpz-django61')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/48/bb/3d8757f21e9a53d9035c9eb039a777047139a16bfdbedfc7a58241c3d914/starlette-1.10.0.tar.gz", hash = "sha256:b8399098d4c1e3522734f7235dc79b1fc967f96cf139c81e0fa30479e0685f9b", size = 2734356, upload-time = "2026-10-24T15:04:12.342Z" }
 wheels = [

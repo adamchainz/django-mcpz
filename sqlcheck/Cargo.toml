@@ -1,0 +1,16 @@
+[package]
+name = "django-mcpz-sqlcheck"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+name = "django_mcpz_sqlcheck"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.30.1", features = ["abi3-py311"] }
+# Pinned exactly: the checker matches every field of the AST, so upgrading
+# needs a review of what each new field allows.
+sqlparser = "=0.63.0"

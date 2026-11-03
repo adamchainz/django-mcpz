@@ -1,0 +1,30 @@
+[build-system]
+build-backend = "maturin"
+requires = [
+  "maturin>=1.9,<2",
+]
+
+[project]
+name = "django-mcpz-sqlcheck"
+version = "0.1.0"
+description = "The SQL query checker for django-mcpz's SQL tools."
+license = "MIT"
+requires-python = ">=3.11"
+classifiers = [
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Rust",
+  "Typing :: Typed",
+]
+
+[tool.maturin]
+python-source = "python"
+module-name = "django_mcpz_sqlcheck._sqlcheck"
+features = [ "pyo3/extension-module" ]
+
+[tool.uv]
+# Rebuild when the Rust changes.
+cache-keys = [
+  { file = "pyproject.toml" },
+  { file = "Cargo.toml" },
+  { file = "src/**/*.rs" },
+]

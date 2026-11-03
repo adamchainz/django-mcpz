@@ -43,6 +43,9 @@ dependencies = [
   "django-msgspec>=1",
   "msgspec>=0.20",
 ]
+optional-dependencies.sql = [
+  "django-mcpz-sqlcheck",
+]
 urls.Changelog = "https://django-mcpz.readthedocs.io/en/latest/changelog.html"
 urls.Documentation = "https://django-mcpz.readthedocs.io/"
 urls.Funding = "https://adamj.eu/books/"
@@ -51,6 +54,7 @@ urls.Repository = "https://github.com/adamchainz/django-mcpz"
 [dependency-groups]
 test = [
   "coverage[toml]",
+  "django-mcpz-sqlcheck",
   "mcp>=2,<3",
   "psycopg[binary]>=3.1",
   "pytest>=9",
@@ -70,6 +74,8 @@ django61 = [ "django>=6.1a1,<6.2; python_version>='3.12'" ]
 example = [ "pillow>=10.1" ]
 
 [tool.uv]
+sources.django-mcpz-sqlcheck = { workspace = true }
+workspace.members = [ "sqlcheck" ]
 conflicts = [
   [
     { group = "django52" },
@@ -119,7 +125,7 @@ lint.isort.required-imports = [ "from __future__ import annotations" ]
 max_supported_python = "3.15"
 
 [tool.mypy]
-mypy_path = "src/"
+mypy_path = "src/:sqlcheck/python/"
 namespace_packages = false
 warn_unreachable = true
 enable_error_code = [
