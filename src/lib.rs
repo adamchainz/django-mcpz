@@ -12,6 +12,7 @@
 //! lexer would read the text differently.
 
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 
 use pyo3::create_exception;
 use pyo3::exceptions::PyValueError;
@@ -34,6 +35,7 @@ type Check<T = ()> = Result<T, String>;
 
 /// A table, view, CTE, or subquery in a query's FROM, by the name queries
 /// refer to it by, with the columns it may read.
+#[derive(Clone)]
 struct Source {
     name: String,
     columns: Vec<String>,
@@ -349,6 +351,7 @@ impl Checker {
         };
 
         let mut outputs = Vec::new();
+        let mut aliases = Vec::new();
         for item in projection {
             match item {
                 SelectItem::UnnamedExpr(expr) => {
@@ -364,6 +367,7 @@ impl Checker {
                 SelectItem::ExprWithAlias { expr, alias } => {
                     self.expr(expr, &scope, ctes)?;
                     outputs.push(Some(self.name(alias)));
+                    aliases.push(self.name(alias));
                 }
                 SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(..) => {
                     return Err("SELECT * isn't allowed: name the columns to select.".to_string());
@@ -371,8 +375,12 @@ impl Checker {
                 SelectItem::ExprWithAliases { .. } => return not_allowed("Multiple aliases"),
             }
         }
-        for condition in conditions {
-            self.expr(condition, &scope, ctes)?;
+        for (condition, join) in conditions {
+            let join_scope = Scope {
+                sources: scope.sources[join].to_vec(),
+                parent: outer,
+            };
+            self.expr(condition, &join_scope, ctes)?;
         }
         if let Some(selection) = selection {
             self.expr(selection, &scope, ctes)?;
@@ -415,9 +423,14 @@ impl Checker {
                 if with_fill.is_some() {
                     return not_allowed("WITH FILL");
                 }
-                // A bare name of an output column means that column, in
-                // both databases, ahead of any input column.
-                let output = matches!(expr, Expr::Identifier(ident) if outputs.contains(&Some(self.name(ident))));
+                // A bare name of an output column means that column, ahead
+                // of any input column: in PostgreSQL, any output column's
+                // name, but in SQLite, only an alias given with AS.
+                let output = match expr {
+                    Expr::Identifier(ident) if self.sqlite => aliases.contains(&self.name(ident)),
+                    Expr::Identifier(ident) => outputs.contains(&Some(self.name(ident))),
+                    _ => false,
+                };
                 if !output && !is_integer(expr) {
                     self.expr(expr, &scope, ctes)?;
                 }
@@ -467,9 +480,12 @@ impl Checker {
         ctes: Option<&Ctes>,
         outer: Option<&Scope>,
         sources: &mut Vec<Source>,
-        conditions: &mut Vec<&'e Expr>,
+        conditions: &mut Vec<(&'e Expr, Range<usize>)>,
     ) -> Check {
         let TableWithJoins { relation, joins } = table;
+        // A join's ON and USING see only the tables in its own join tree,
+        // from here, not those of other FROM items, separated by commas.
+        let start = sources.len();
         self.table_factor(relation, ctes, outer, sources, conditions)?;
         for join in joins {
             let Join {
@@ -494,12 +510,16 @@ impl Checker {
                 _ => return not_allowed("That kind of join"),
             };
             match constraint {
-                JoinConstraint::On(expr) => conditions.push(expr),
+                JoinConstraint::On(expr) => conditions.push((expr, start..sources.len())),
                 JoinConstraint::Using(names) => {
                     for name in names {
                         let column = self.object_name(name)?;
                         let has = |source: &Source| source.columns.contains(&column);
-                        if !sources[..left].iter().any(has) || !sources[left..].iter().all(has) {
+                        // Readable on each side, or the database reports the
+                        // name as ambiguous, or missing, if another table
+                        // there has it unreadable.
+                        if !sources[start..left].iter().any(has) || !sources[left..].iter().any(has)
+                        {
                             return Err(format!(
                                 "USING ({name}) needs {name} readable on both sides of the join."
                             ));
@@ -519,7 +539,7 @@ impl Checker {
         ctes: Option<&Ctes>,
         outer: Option<&Scope>,
         sources: &mut Vec<Source>,
-        conditions: &mut Vec<&'e Expr>,
+        conditions: &mut Vec<(&'e Expr, Range<usize>)>,
     ) -> Check {
         match factor {
             TableFactor::Table {

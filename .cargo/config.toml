@@ -3,5 +3,5 @@ rustflags = ["-C", "force-frame-pointers=yes"]
 
 [env]
 # Test threads' stacks, for proptest's deeply nested query strategies in
-# debug builds, beyond the default 2 MiB. The checker itself needs much less.
-RUST_MIN_STACK = "16777216"
+# debug builds, beyond the default 2 MiB, up to 64 MiB. The checker itself needs much less.
+RUST_MIN_STACK = "67108864"
