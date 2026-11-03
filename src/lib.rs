@@ -1151,3 +1151,6 @@ fn _sqlcheck(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("QueryNotAllowed", m.py().get_type::<QueryNotAllowed>())?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;
