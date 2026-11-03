@@ -11,14 +11,20 @@ description = "The SQL query checker for django-mcpz's SQL tools."
 license = "MIT"
 requires-python = ">=3.11"
 classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: 3.15",
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Rust",
   "Typing :: Typed",
 ]
 
 [tool.maturin]
-python-source = "python"
 module-name = "django_mcpz_sqlcheck._sqlcheck"
+python-source = "python"
 features = [ "pyo3/extension-module" ]
 
 [tool.uv]

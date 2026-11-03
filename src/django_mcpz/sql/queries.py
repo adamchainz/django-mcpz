@@ -471,6 +471,81 @@ def _sqlite_error(exc: DatabaseError, sql: str, timeout: float) -> Exception:
     return ToolError(f"Query error: {message}")
 
 
+# The functions queries may call, by database, as checked before running
+# them: aggregates, window functions, and functions on numbers, text, dates,
+# and JSON, none of which reach beyond the query's own data, such as into
+# settings, files, or other sessions. Mostly in both databases, so the same
+# queries work on each.
+_COMMON_FUNCTIONS = frozenset(
+    {
+        # Aggregates.
+        "avg",
+        "count",
+        "max",
+        "min",
+        "sum",
+        # Window functions.
+        "dense_rank",
+        "first_value",
+        "lag",
+        "last_value",
+        "lead",
+        "ntile",
+        "rank",
+        "row_number",
+        # Numbers.
+        "abs",
+        "ceil",
+        "floor",
+        "round",
+        # Nulls.
+        "coalesce",
+        "nullif",
+        # Text.
+        "length",
+        "lower",
+        "ltrim",
+        "replace",
+        "rtrim",
+        "substr",
+        "substring",
+        "trim",
+        "upper",
+        # Dates and times.
+        "current_date",
+        "current_timestamp",
+    }
+)
+FUNCTIONS: dict[str, frozenset[str]] = {
+    "postgresql": _COMMON_FUNCTIONS
+    | {
+        "date_part",
+        "date_trunc",
+        "extract",
+        "greatest",
+        "json_array_length",
+        "jsonb_array_length",
+        "least",
+        "position",
+        "string_agg",
+        "to_char",
+    },
+    "sqlite": _COMMON_FUNCTIONS
+    | {
+        "date",
+        "datetime",
+        "group_concat",
+        "instr",
+        "json_array_length",
+        "json_extract",
+        "julianday",
+        "strftime",
+        "time",
+        "total",
+    },
+}
+
+
 QUERIES: dict[str, Query] = {
     "postgresql": postgresql_query,
     "sqlite": sqlite_query,

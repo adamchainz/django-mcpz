@@ -23,7 +23,13 @@ For SQLite, skip the database alias, and leave ``using`` as ``"default"``, as co
 
 The setup takes four steps: installing the app, a database alias for the role, a reader listing what the role can read, and the tools.
 
-1. Add the ``django_mcpz.sql`` app to your ``INSTALLED_APPS``:
+1. Install django-mcpz with the ``sql`` extra, which adds the query checker, a compiled Rust extension:
+
+   .. code-block:: sh
+
+       python -m pip install 'django-mcpz[sql]'
+
+   Then add the ``django_mcpz.sql`` app to your ``INSTALLED_APPS``:
 
    .. code-block:: python
 
@@ -240,6 +246,50 @@ Rows are left out past ``max_rows``, or when the result would exceed ``max_size`
 Long values are shortened too, to a fair share of ``max_size``, so a single huge value can’t flood the LLM’s context.
 
 Errors in the query, such as syntax errors, unknown columns, and permission denied, are returned to the LLM as tool errors, with the database’s message, so it can correct itself.
+
+.. _sql-checking:
+
+Who sees what
+-------------
+
+Each call sees only the reader’s tables that ``can_view`` allows for its request.
+By default, that’s :func:`view_permission`, the tables whose models the user has the view permission for, ``<app_label>.view_<model_name>``, as the admin checks.
+So grant users and groups the view permissions for the tables they may query, or pass your own function:
+
+.. code-block:: python
+
+    def can_view(request, model):
+        return request.user.is_staff
+
+
+    add_sql_tools(server, reader=reports_reader, can_view=can_view)
+
+``sql_schema`` lists and describes only the visible tables, and ``sql_query`` checks each query before it runs, with the ``django-mcpz-sqlcheck`` package, which parses it with `sqlparser <https://github.com/apache/datafusion-sqlparser-rs>`__.
+The checker is conservative, allowing only what it fully understands:
+
+* One ``SELECT``, optionally with ``WITH``, and ``UNION``, ``INTERSECT``, or ``EXCEPT``.
+  No other statements, no ``WITH RECURSIVE``, locking clauses, ``SELECT INTO``, or ``LATERAL``.
+
+* Tables, by unqualified name, of the visible ones, plus the query’s own ``WITH`` tables and subqueries, which need aliases.
+
+* Columns, named, rather than ``*``, and readable, as listed by the reader.
+  An unqualified column must be readable in exactly one table of the innermost query with tables, since the database resolves names there first, possibly to a column the checker can’t see.
+  Otherwise, qualify it with its table’s name or alias.
+
+* Joins, with ``ON`` or ``USING``, but not ``NATURAL``.
+
+* Functions from a list per database: aggregates, window functions, and common functions on numbers, text, dates, and JSON, such as ``count()``, ``round()``, ``coalesce()``, ``lower()``, ``date_trunc()`` on PostgreSQL, and ``strftime()`` on SQLite.
+  None reach beyond the query’s own data.
+
+* Arithmetic, comparison, ``LIKE``, ``->``, and ``->>`` operators, ``CASE``, ``CAST`` to plain types, plain numbers, and ``'single-quoted'`` strings.
+
+Anything else is returned to the LLM as an error saying what isn’t allowed, so it can rewrite the query.
+
+The query that runs is the checked one, rendered back to SQL from what the checker parsed, rather than the original text.
+So the database runs what was checked, even where its own parser would read the text differently.
+
+The checker is one layer.
+The reader still sets the most any call can read, enforced by the database, with the role on PostgreSQL and the authorizer on SQLite, as below.
 
 Security
 --------

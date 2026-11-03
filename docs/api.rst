@@ -341,9 +341,10 @@ SQL tools
 
 As covered in :doc:`sql`.
 
-.. function:: add_sql_tools(server, *, reader, context=None, max_rows=1000, max_size=50000, timeout=10.0, name_prefix="sql", permission=None)
+.. function:: add_sql_tools(server, *, reader, context=None, max_rows=1000, max_size=50000, timeout=10.0, name_prefix="sql", permission=None, can_view=None)
 
-    Add two tools to ``server``: ``<name_prefix>_schema``, listing the reader’s tables, or describing the columns of some, and ``<name_prefix>_query``, running one read-only PostgreSQL query against them.
+    Add two tools to ``server``: ``<name_prefix>_schema``, listing the reader’s tables, or describing the columns of some, and ``<name_prefix>_query``, running one read-only query against them.
+    Each call sees only the tables ``can_view`` allows, and each query is checked before it runs, as covered in :ref:`sql-checking`.
 
     :param server:
         The :class:`~django_mcpz.server.MCPServer` to add the tools to.
@@ -375,7 +376,16 @@ As covered in :doc:`sql`.
     :param permission:
         An optional permission for both tools, as for :meth:`~django_mcpz.server.MCPServer.tool`.
 
+    :param can_view:
+        A function taking the request and a model of one of the reader’s tables, returning whether the tools may show and query that table for the request.
+        By default, :func:`view_permission`, allowing the tables whose models the user has the view permission for.
+
     Raises ``ImproperlyConfigured`` if the ``django_mcpz.sql`` app isn’t installed, or a limit is out of range.
+
+.. function:: view_permission(request, model)
+
+    Whether the request’s user has ``model``’s view permission, ``<app_label>.view_<model_name>``, as the admin checks.
+    The default ``can_view`` for :func:`add_sql_tools`.
 
 .. currentmodule:: django_mcpz.sql.readers
 

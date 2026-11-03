@@ -330,4 +330,7 @@ add_sql_tools(
     server,
     reader=reports_reader,
     context="MCPizza's sales data. Prices and totals are in pounds (GBP).",
+    # Every caller sees every table, since this local demo has no users. By
+    # default, each user sees the tables they have the view permission for.
+    can_view=lambda request, model: True,
 )

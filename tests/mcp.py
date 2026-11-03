@@ -578,6 +578,10 @@ bearer_elicitation_server.tool(
 
 
 # On PostgreSQL, the reader alias, whose role may read only these columns.
+def can_view_all(request, model):
+    return True
+
+
 sql_postgres_reader = SQLReader(
     using="reader",
     grantor="postgres",
@@ -592,6 +596,7 @@ add_sql_tools(
     context="Test widgets.",
     max_rows=2,
     timeout=1,
+    can_view=can_view_all,
 )
 
 
@@ -604,4 +609,17 @@ sql_sqlite_reader = SQLReader(
     },
 )
 sql_sqlite_server = MCPServer(name="sql-sqlite-server", version="1.0.0", auth=public)
-add_sql_tools(sql_sqlite_server, reader=sql_sqlite_reader, max_rows=2, timeout=1)
+add_sql_tools(
+    sql_sqlite_server,
+    reader=sql_sqlite_reader,
+    max_rows=2,
+    timeout=1,
+    can_view=can_view_all,
+)
+
+# The same reader, with each user seeing the tables they have the view
+# permission for, by default.
+sql_permissions_server = MCPServer(
+    name="sql-permissions-server", version="1.0.0", auth=public
+)
+add_sql_tools(sql_permissions_server, reader=sql_sqlite_reader)

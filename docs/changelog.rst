@@ -9,6 +9,8 @@ Unreleased
   A ``SQLReader``, defined alongside the tools, lists those columns, and the app maintains the database role the queries run as to match, after every ``migrate``.
   See :doc:`sql`.
 
+  Each call sees only the tables the user has the view permission for, and queries are checked before they run by ``django-mcpz-sqlcheck``, a Rust extension, installed with the ``sql`` extra.
+
   `PR #42 <https://github.com/adamchainz/django-mcpz/pull/42>`__.
 
 * Document the convention of defining MCP servers in an ``mcp`` module of an app, an ``mcp.py`` file or ``mcp`` package, alongside its ``models.py`` and ``admin.py``.

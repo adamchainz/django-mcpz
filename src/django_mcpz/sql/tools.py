@@ -13,16 +13,18 @@ from typing import Annotated, Any
 import msgspec
 import msgspec.json
 from django.apps import apps
+from django.contrib.auth import get_permission_codename
 from django.core.exceptions import ImproperlyConfigured
 from django.db import connections
 from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.backends.utils import CursorWrapper
 from django.db.models import CompositePrimaryKey, Field, Model
 from django.http import HttpRequest
+from django_mcpz_sqlcheck import QueryNotAllowed, check_query
 from django_msgspec import enc_hook as django_enc_hook
 
 from django_mcpz.server import MCPServer, ToolError
-from django_mcpz.sql.queries import get_query
+from django_mcpz.sql.queries import FUNCTIONS, get_query
 from django_mcpz.sql.readers import SQLReader, Table, db_type, quote_name
 
 # Rows are fetched in batches, checking the limits between them, so a query
@@ -48,11 +50,21 @@ class SQLQueryParams(msgspec.Struct):
         str,
         msgspec.Meta(
             description=(
-                "A single SELECT statement. WITH, VALUES, and TABLE work"
-                " too. No other statement types."
+                "A single SELECT statement, optionally with WITH, and UNION,"
+                " INTERSECT, or EXCEPT. No other statement types."
             )
         ),
     ]
+
+
+def view_permission(request: HttpRequest, model: type[Model]) -> bool:
+    """
+    Whether the request's user may view the model, with its view permission,
+    as in the admin.
+    """
+    opts = model._meta
+    codename = get_permission_codename("view", opts)
+    return request.user.has_perm(f"{opts.app_label}.{codename}")
 
 
 def add_sql_tools(
@@ -65,6 +77,7 @@ def add_sql_tools(
     timeout: float = 10.0,
     name_prefix: str = "sql",
     permission: Callable[[HttpRequest], bool] | str | None = None,
+    can_view: Callable[[HttpRequest, type[Model]], bool] | None = None,
 ) -> None:
     """
     Add two tools to the server: one listing the reader's tables, or
@@ -77,6 +90,11 @@ def add_sql_tools(
     is the security boundary. On SQLite, an authorizer callback allows only
     reads of those columns. Both add a single statement per call, a timeout,
     and limits on the result.
+
+    Each call sees only the reader's tables whose models can_view allows, by
+    default view_permission(), those the user has the view permission for. Queries are checked
+    before they run, with django_mcpz_sqlcheck, which allows only SELECT
+    queries reading those tables' columns and calling a list of functions.
     """
     if not apps.is_installed("django_mcpz.sql"):
         raise ImproperlyConfigured(
@@ -91,8 +109,13 @@ def add_sql_tools(
     if timeout <= 0:
         raise ImproperlyConfigured("timeout must be positive.")
 
+    if can_view is None:
+        can_view = view_permission
     schema_name = f"{name_prefix}_schema"
     query_name = f"{name_prefix}_query"
+
+    def visible(request: HttpRequest) -> list[Table]:
+        return [table for table in reader.tables if can_view(request, table.model)]
 
     @server.tool(
         name=schema_name,
@@ -108,9 +131,10 @@ def add_sql_tools(
         permission=permission,
     )
     def sql_schema(request: HttpRequest, params: SQLSchemaParams) -> str:
+        tables = visible(request)
         if not params.tables:
-            return list_tables(reader, context=context, schema_tool=schema_name)
-        by_name = {table.name: table for table in reader.tables}
+            return list_tables(reader, tables, context=context, schema_tool=schema_name)
+        by_name = {table.name: table for table in tables}
         # Accept names as the model would write them in SQL, quoted or not.
         names = [name.strip().strip('"').replace('""', '"') for name in params.tables]
         unknown = [name for name in names if name not in by_name]
@@ -120,7 +144,9 @@ def add_sql_tools(
                 " Available tables:"
                 f" {', '.join(quote_name(n) for n in by_name)}."
             )
-        return describe_tables(reader, [by_name[name] for name in dict.fromkeys(names)])
+        return describe_tables(
+            reader, [by_name[name] for name in dict.fromkeys(names)], visible=tables
+        )
 
     @server.tool(
         name=query_name,
@@ -143,6 +169,7 @@ def add_sql_tools(
         columns, rows, more = run_query(
             params.sql,
             reader=reader,
+            tables=visible(request),
             max_rows=max_rows,
             max_size=max_size,
             timeout=timeout,
@@ -151,13 +178,23 @@ def add_sql_tools(
 
 
 def run_query(
-    sql: str, *, reader: SQLReader, max_rows: int, max_size: int, timeout: float
+    sql: str,
+    *,
+    reader: SQLReader,
+    tables: Sequence[Table] | None = None,
+    max_rows: int,
+    max_size: int,
+    timeout: float,
 ) -> tuple[list[str], list[tuple[Any, ...]], bool]:
     """
     Run a query as the reader, returning the column names, up to max_rows
     rows, and whether rows were left unfetched. It runs in a transaction, or
     savepoint, that is always rolled back, made read-only by the database's
     query context manager.
+
+    First, the query is checked, so it reads only the columns of tables, by
+    default all the reader's, and calls only the database's allowed
+    functions. What runs is the query as checked, rendered back to SQL.
 
     Rows are fetched in batches, stopping at max_rows, or once roughly
     max_size bytes of values have arrived. The query context manager times
@@ -168,6 +205,18 @@ def run_query(
     sql = sql.strip().rstrip(";").rstrip()
     if not sql:
         raise ToolError("The SQL is empty.")
+    try:
+        sql = check_query(
+            sql,
+            dialect=connection.vendor,
+            tables={
+                table.name: table.columns
+                for table in (reader.tables if tables is None else tables)
+            },
+            functions=FUNCTIONS[connection.vendor],
+        )
+    except QueryNotAllowed as exc:
+        raise ToolError(f"Query not allowed: {exc}") from None
     with query(connection, reader, sql, timeout) as cursor:
         columns = [column[0] for column in cursor.description]
         rows, more = _fetch(cursor, max_rows, max_size)
@@ -300,12 +349,16 @@ def _shorten(value: Any, max_value: int) -> tuple[Any, bool]:
 
 
 def list_tables(
-    reader: SQLReader, *, context: str | None = None, schema_tool: str = "sql_schema"
+    reader: SQLReader,
+    tables: Sequence[Table],
+    *,
+    context: str | None = None,
+    schema_tool: str = "sql_schema",
 ) -> str:
     """
-    List the reader's tables, each with its description, from the model's
-    db_table_comment or docstring, plus the context and anything else that
-    applies to every query.
+    List some of the reader's tables, each with its description, from the
+    model's db_table_comment or docstring, plus the context and anything else
+    that applies to every query.
     """
     connection = connections[reader.using]
     parts = []
@@ -325,7 +378,9 @@ def list_tables(
             " applies to date functions on timestamp with time zone columns."
         )
     lines = ["Tables:"]
-    for table in reader.tables:
+    if not tables:
+        lines.append("None. You don't have permission to view any.")
+    for table in tables:
         line = f"- {quote_name(table.name)}"
         description = _table_description(table.model)
         if description:
@@ -336,15 +391,24 @@ def list_tables(
     return "\n\n".join(parts) + "\n"
 
 
-def describe_tables(reader: SQLReader, tables: Sequence[Table]) -> str:
+def describe_tables(
+    reader: SQLReader,
+    tables: Sequence[Table],
+    *,
+    visible: Sequence[Table] | None = None,
+) -> str:
     """
     Describe some of the reader's tables as CREATE TABLE statements, with
     comments from each model's db_table_comment or docstring, and each
     field's db_comment or help_text, verbose name, and choices. Foreign keys
-    to exposed columns of any of the reader's tables get REFERENCES.
+    to exposed columns of the visible tables, by default all the reader's,
+    get REFERENCES.
     """
     connection = connections[reader.using]
-    exposed = {table.name: set(table.columns) for table in reader.tables}
+    exposed = {
+        table.name: set(table.columns)
+        for table in (reader.tables if visible is None else visible)
+    }
     parts = [_describe_table(table, connection, exposed) for table in tables]
     return "\n\n".join(parts) + "\n"
 

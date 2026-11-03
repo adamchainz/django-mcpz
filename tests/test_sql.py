@@ -93,6 +93,13 @@ def make_reader(tables, using="reader", grantor="postgres"):
         return SQLReader(tables=tables, using=using, grantor=grantor)
 
 
+# For tests of the database's own limits, which hold even for queries the
+# checker would reject.
+skip_check = mock.patch(
+    "django_mcpz.sql.tools.check_query", new=lambda sql, **kwargs: sql
+)
+
+
 def create_widgets(using="default"):
     Widget.objects.using(using).bulk_create(
         [
@@ -285,7 +292,7 @@ class ListTablesTests(SimpleTestCase):
     @override_settings(USE_TZ=False, TIME_ZONE="Europe/London")
     def test_sqlite_local_time(self):
         reader = make_reader({Widget: ["id"]}, using="default", grantor="default")
-        assert list_tables(reader).startswith(
+        assert list_tables(reader, reader.tables).startswith(
             "Dates and times are stored as ISO 8601 text, in the time zone"
             " Europe/London, so use SQLite's date and time functions on them.\n"
         )
@@ -294,7 +301,7 @@ class ListTablesTests(SimpleTestCase):
         reader = make_reader(
             {WidgetView: ["id"], Undocumented: ["id"], Reserved: ["id"], Part: ["id"]}
         )
-        assert list_tables(reader, schema_tool="widgets_schema") == (
+        assert list_tables(reader, reader.tables, schema_tool="widgets_schema") == (
             "Queries run with the time zone UTC, which applies to date"
             " functions on timestamp with time zone columns.\n"
             "\n"
@@ -616,6 +623,7 @@ class FetchTests(SimpleTestCase):
         )
 
 
+@skip_check
 class PostgresServerTests(ServerTestCase, TestCase):
     url = "/sql-postgres-mcp"
     databases = {"postgres", "reader"}
@@ -888,6 +896,7 @@ class PostgresServerTests(ServerTestCase, TestCase):
             assert self.query("SELECT 1") == "Tool 'sql_query' failed unexpectedly."
 
 
+@skip_check
 class RunQueryTransactionTests(TransactionTestCase):
     # The reader alias is not in a transaction here, unlike in TestCase.
     databases = {"postgres", "reader"}
@@ -1186,6 +1195,7 @@ class SyncReadersTests(SimpleTestCase):
         assert "tests_x" in stdout.getvalue()
 
 
+@skip_check
 class SQLiteServerTests(ServerTestCase, TransactionTestCase):
     # Queries run on a fresh connection, which sees only committed data.
     url = "/sql-sqlite-mcp"

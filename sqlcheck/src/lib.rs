@@ -386,9 +386,18 @@ impl Checker {
                     // Output columns by position, or expressions of the
                     // inputs, not output names, which PostgreSQL resolves
                     // as input columns first.
-                    if !is_integer(expr) {
-                        self.expr(expr, &scope, ctes)?;
+                    if is_integer(expr) {
+                        continue;
                     }
+                    let result = self.expr(expr, &scope, ctes);
+                    if let (Err(_), Expr::Identifier(ident)) = (&result, expr)
+                        && outputs.contains(&Some(self.name(ident)))
+                    {
+                        return Err(format!(
+                            "GROUP BY {ident} isn't allowed, as it names an output column. Repeat its expression, or give its position."
+                        ));
+                    }
+                    result?;
                 }
             }
             GroupByExpr::All(_) => return not_allowed("GROUP BY ALL"),
@@ -608,23 +617,35 @@ impl Checker {
     }
 
     /// Check a column reference resolves to a readable column, as the
-    /// database would resolve it. Unqualified names must be unambiguous: with
-    /// more than one source in scope, here or in enclosing queries, columns
-    /// must be qualified, since a name could resolve to a column the checker
-    /// doesn't know about.
+    /// database would resolve it.
+    ///
+    /// The database resolves an unqualified name in the innermost query with
+    /// a table that has a column of that name, so the checker does too, but
+    /// it doesn't know the columns it can't read. So exactly one source in
+    /// the innermost query with any sources must have the column readable:
+    /// with none, an unreadable column of the same name could be the one the
+    /// database picks, and with more, the name is ambiguous.
     fn column(&self, parts: &[Ident], scope: &Scope) -> Check {
         match parts {
             [column] => {
-                let mut sources = scope.levels().flat_map(|level| &level.sources);
-                let (Some(source), None) = (sources.next(), sources.next()) else {
-                    return Err(match scope.levels().all(|level| level.sources.is_empty()) {
-                        true => format!("There's no table for the column {column}."),
-                        false => format!(
-                            "Qualify the column {column} with its table's name or alias, as the query reads more than one table."
-                        ),
-                    });
+                let name = self.name(column);
+                let Some(level) = scope.levels().find(|level| !level.sources.is_empty()) else {
+                    return Err(format!("There's no table for the column {column}."));
                 };
-                self.source_column(source, column)
+                let mut found = level.sources.iter().filter(|s| s.columns.contains(&name));
+                match (found.next(), found.next(), level.sources.as_slice()) {
+                    (Some(_), None, _) => Ok(()),
+                    (None, _, [source]) => Err(format!(
+                        "{} has no column {column} that can be queried.",
+                        source.name
+                    )),
+                    (None, _, _) => Err(format!(
+                        "No table in FROM has a column {column} that can be queried."
+                    )),
+                    (Some(_), Some(_), _) => Err(format!(
+                        "The column {column} is ambiguous. Qualify it with its table's name or alias."
+                    )),
+                }
             }
             [table, column] => {
                 let table_name = self.name(table);
@@ -1115,9 +1136,13 @@ fn check_query(
     sql: &str,
     dialect: &str,
     tables: HashMap<String, Vec<String>>,
-    functions: Vec<String>,
+    functions: &Bound<'_, PyAny>,
 ) -> PyResult<String> {
-    check(sql, dialect, tables, functions.into_iter().collect()).map_err(QueryNotAllowed::new_err)
+    let functions = functions
+        .try_iter()?
+        .map(|name| name?.extract::<String>())
+        .collect::<PyResult<HashSet<String>>>()?;
+    check(sql, dialect, tables, functions).map_err(QueryNotAllowed::new_err)
 }
 
 #[pymodule]
