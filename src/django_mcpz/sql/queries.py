@@ -121,7 +121,13 @@ def postgresql_query(
         except DatabaseError as exc:
             raise _postgresql_error(exc, sql, timeout, declare_length) from None
     finally:
-        # Closing without committing rolls back the transaction.
+        # Roll back before closing, which, with Django's connection pool,
+        # returns the connection to the pool, which would otherwise roll it
+        # back itself, with a warning. Not if the connection broke, when
+        # closing is enough.
+        if fresh.connection is not None and not fresh.connection.closed:
+            with contextlib.suppress(DatabaseError):
+                fresh.rollback()
         fresh.close()
 
 

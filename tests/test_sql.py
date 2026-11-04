@@ -12,7 +12,10 @@ import msgspec.json
 import psycopg
 import pytest
 from django.core.exceptions import ImproperlyConfigured
-from django.db import connections
+from django.db import DatabaseError, OperationalError, connections
+from django.db.backends.postgresql.base import (
+    DatabaseWrapper as PostgresDatabaseWrapper,
+)
 from django.db.models import Model
 from django.test import (
     SimpleTestCase,
@@ -765,6 +768,55 @@ class PostgresServerTests(ServerTestCase, TestCase):
             self.assertLogs("django_mcpz", "ERROR"),
         ):
             assert self.query("SELECT 1") == "Tool 'sql_query' failed unexpectedly."
+
+
+@skip_check
+class PostgresConnectionTests(TestCase):
+    # Each query's own connection.
+    databases = {"postgres"}
+
+    def run_query(self, sql):
+        return run_query(
+            sql,
+            reader=sql_postgres_reader,
+            max_rows=10,
+            max_size=1000,
+            timeout=1,
+        )
+
+    def test_pool(self):
+        # With Django's connection pool, queries borrow pooled connections,
+        # returned rolled back, so the pool doesn't warn.
+        connection = connections["postgres"]
+        assert isinstance(connection, PostgresDatabaseWrapper)
+        with (
+            mock.patch.dict(
+                connection.settings_dict["OPTIONS"],
+                {"pool": {"min_size": 1, "max_size": 1}},
+            ),
+            self.assertNoLogs("psycopg.pool", "WARNING"),
+        ):
+            try:
+                first = self.run_query("SELECT pg_backend_pid()")
+                second = self.run_query("SELECT pg_backend_pid()")
+            finally:
+                connection.close_pool()
+        assert first == second
+
+    def test_rollback_fails(self):
+        # Closing the connection is enough.
+        with mock.patch(
+            "django.db.backends.postgresql.base.DatabaseWrapper.rollback",
+            side_effect=DatabaseError,
+        ):
+            assert self.run_query("SELECT 1 AS one") == (["one"], [(1,)], False)
+
+    def test_connect_fails(self):
+        with (
+            mock.patch.dict(connections["postgres"].settings_dict, {"PORT": "1"}),
+            pytest.raises(OperationalError),
+        ):
+            self.run_query("SELECT 1")
 
 
 @skip_check

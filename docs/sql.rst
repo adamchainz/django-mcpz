@@ -234,8 +234,14 @@ On top of the checker, the tools limit what a query can do beyond reading:
 
 * Each query runs on a fresh connection to the alias’s database, closed afterwards.
   So it sees only committed data, not uncommitted changes in the current request’s transaction, and leaves your app’s own connection untouched.
-  It costs a new database connection per query, which on PostgreSQL can take tens of milliseconds, more over TLS, and adds a server process for the query’s duration.
   Hooks you add to the alias’s connection with |execute_wrapper|__ apply to it too.
+
+  On PostgreSQL, opening a connection takes several milliseconds, and tens over a network with TLS.
+  To avoid that, use Django’s |connection pool|__, with the ``"pool"`` option, and each query borrows a pooled connection, returning it afterwards, rolled back.
+  Size the pool for it: during a query, the request holds two connections, its own, if it has used the database, and the query’s.
+
+  .. |connection pool| replace:: connection pool
+  __ https://docs.djangoproject.com/en/stable/ref/databases/#postgresql-pool
 
 * On PostgreSQL, the query runs in a ``READ ONLY`` transaction, which is never committed.
 
