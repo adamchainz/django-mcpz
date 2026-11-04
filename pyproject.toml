@@ -1,8 +1,6 @@
 [build-system]
-build-backend = "uv_build"
-requires = [
-  "uv-build>=0.12.1,<0.13",
-]
+build-backend = "maturin"
+requires = [ "maturin>=1.8,<2" ]
 
 [project]
 name = "django-mcpz"
@@ -52,7 +50,7 @@ urls.Repository = "https://github.com/adamchainz/django-mcpz"
 test = [
   "coverage[toml]",
   "mcp>=2,<3",
-  "psycopg[binary]>=3.1",
+  "psycopg[binary,pool]>=3.1",
   "pytest>=9",
   "pytest-django",
   "pytest-randomly",
@@ -69,6 +67,14 @@ django60 = [ "django>=6a1,<6.1; python_version>='3.12'" ]
 django61 = [ "django>=6.1a1,<6.2; python_version>='3.12'" ]
 example = [ "pillow>=10.1" ]
 
+[tool.maturin]
+module-name = "django_mcpz._sqlcheck"
+python-source = "src"
+include = [
+  "rust-toolchain.toml",
+]
+features = [ "pyo3/extension-module" ]
+
 [tool.uv]
 conflicts = [
   [
@@ -76,6 +82,12 @@ conflicts = [
     { group = "django60" },
     { group = "django61" },
   ],
+]
+# Rebuild the extension when the Rust changes.
+cache-keys = [
+  { file = "pyproject.toml" },
+  { file = "Cargo.toml" },
+  { file = "src/**/*.rs" },
 ]
 
 [tool.ruff]

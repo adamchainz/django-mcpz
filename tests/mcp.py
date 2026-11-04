@@ -22,7 +22,9 @@ from django_mcpz.server import (
     elicit,
     public,
 )
-from tests.models import Widget
+from django_mcpz.sql.readers import SQLReader
+from django_mcpz.sql.tools import add_sql_tools
+from tests.models import Widget, WidgetView
 
 server = MCPServer(
     name="example-server",
@@ -573,3 +575,46 @@ bearer_elicitation_server = MCPServer(
 bearer_elicitation_server.tool(
     description="Ask for confirmation, as the calling user."
 )(confirm_as_user)
+
+
+# On PostgreSQL, the reader alias, whose role may read only these columns.
+# On PostgreSQL.
+sql_postgres_reader = SQLReader(
+    using="postgres",
+    tables={WidgetView: ["id", "name", "price"]},
+)
+sql_postgres_server = MCPServer(
+    name="sql-postgres-server", version="1.0.0", auth=public
+)
+add_sql_tools(
+    sql_postgres_server,
+    reader=sql_postgres_reader,
+    context="Test widgets.",
+    max_rows=2,
+    timeout=1,
+)
+
+
+# On SQLite, the default alias.
+sql_sqlite_reader = SQLReader(
+    tables={
+        Widget: ["id", "name", "price"],
+        WidgetView: ["id", "name"],
+    },
+)
+sql_sqlite_server = MCPServer(name="sql-sqlite-server", version="1.0.0", auth=public)
+add_sql_tools(sql_sqlite_server, reader=sql_sqlite_reader, max_rows=2, timeout=1)
+
+# The same tables, with each user seeing those they have the view permission
+# for.
+sql_permissions_reader = SQLReader(
+    tables={
+        Widget: ["id", "name", "price"],
+        WidgetView: ["id", "name"],
+    },
+    view_permissions=True,
+)
+sql_permissions_server = MCPServer(
+    name="sql-permissions-server", version="1.0.0", auth=public
+)
+add_sql_tools(sql_permissions_server, reader=sql_permissions_reader)

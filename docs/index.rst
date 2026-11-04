@@ -11,6 +11,7 @@ django-mcpz documentation
    servers
    oauth
    bearer_tokens
+   sql
    api
    protocol
    deployment

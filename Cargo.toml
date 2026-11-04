@@ -1,0 +1,21 @@
+[package]
+name = "django-mcpz"
+version = "1.2.0"
+edition = "2024"
+
+[lib]
+name = "_sqlcheck"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = ">= 0.30.1" }
+# Pinned exactly: the query checker matches every field of the AST, so
+# upgrading needs a review of what each new field allows.
+sqlparser = "=0.63.0"
+
+[dev-dependencies]
+proptest = "1"
+rusqlite = { version = "0.41.1", features = ["bundled", "hooks"] }
+
+[profile.release]
+lto = true

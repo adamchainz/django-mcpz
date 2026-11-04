@@ -332,6 +332,74 @@ For typed input schemas, whether annotated or passed explicitly as ``input_schem
   .. |msgspec.Meta| replace:: ``msgspec.Meta``
   __ https://msgspec.dev/constraints
 
+.. _api-sql:
+
+SQL tools
+---------
+
+.. currentmodule:: django_mcpz.sql.tools
+
+As covered in :doc:`sql`.
+
+.. function:: add_sql_tools(server, *, reader, context=None, max_rows=1000, max_size=50000, timeout=10.0, name_prefix="sql", permission=None)
+
+    Add two tools to ``server``: ``<name_prefix>_schema``, listing the reader’s tables, or describing the columns of some, and ``<name_prefix>_query``, running one read-only query against them.
+    Each query is checked before it runs, as covered in :ref:`sql-checking`.
+
+    :param server:
+        The :class:`~django_mcpz.server.MCPServer` to add the tools to.
+
+    :param reader:
+        The :class:`~django_mcpz.sql.readers.SQLReader` listing the columns queries can read, and the database alias they run through.
+
+    :param context:
+        Optional text shown at the top of the table list, for anything that applies across tables.
+
+    :param max_rows:
+        The most rows a query returns.
+        The LLM is told the limit and when it was hit.
+        ``max_size`` usually binds first, except for narrow results.
+
+    :param max_size:
+        Roughly the most bytes of JSON a query returns, so results fit in the LLM’s context.
+        The default, around 15,000 tokens, stays under the 25,000 tokens Claude Code accepts from a tool by default, with room for the LLM to make several queries.
+        Rows beyond it are left out, and long values are shortened to a fair share of it.
+
+    :param timeout:
+        The timeout for queries, in seconds, including fetching their rows.
+        It must fit within your web server’s request timeout, such as Gunicorn’s default of 30 seconds.
+
+    :param name_prefix:
+        The prefix for the tools’ names, for adding sets of tools for several databases to one server.
+
+    :param permission:
+        An optional permission for both tools, as for :meth:`~django_mcpz.server.MCPServer.tool`.
+
+    Raises ``ImproperlyConfigured`` if a limit is out of range.
+
+.. currentmodule:: django_mcpz.sql.readers
+
+.. class:: SQLReader(*, tables, using="default", view_permissions=False)
+
+    What the SQL tools can read, as covered in :doc:`sql`: the outer limit on every query, which the tools check each query against before running it.
+
+    :param tables:
+        The columns queries can read, as a dict of models, for tables or views, to lists of the names of the fields to expose, such as ``{Order: ["id", "pizza_id", "quantity"]}``.
+        Fields can be named by their name or attribute name, and must be columns of the model’s own table.
+        The models’ and fields’ documentation drives the schema tool.
+
+    :param using:
+        The database alias the tools query through, on PostgreSQL, with psycopg 3, or SQLite.
+
+    :param view_permissions:
+        Whether to limit each call to the tables whose models its user has the view permission for, as covered in :doc:`sql`.
+
+    Raises ``ImproperlyConfigured`` if ``using`` isn’t in ``DATABASES``, the database isn’t PostgreSQL or SQLite, or ``tables`` names a field that isn’t a column.
+
+    Readers are immutable.
+
+.. currentmodule:: django_mcpz.server
+
 .. _api-logging:
 
 Log records

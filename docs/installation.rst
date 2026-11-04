@@ -17,6 +17,9 @@ Installation
 
        python -m pip install django-mcpz
 
+   django-mcpz includes a Rust extension, for :doc:`sql`, with wheels for common platforms.
+   Elsewhere, installing builds it from source, which needs `Rust <https://rustup.rs/>`__.
+
 2. Add django-mcpz to your |INSTALLED_APPS|__:
 
    .. |INSTALLED_APPS| replace:: ``INSTALLED_APPS``

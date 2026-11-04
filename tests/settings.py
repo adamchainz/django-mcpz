@@ -6,23 +6,25 @@ SECRET_KEY = "NOTASECRET"
 
 ALLOWED_HOSTS: list[str] = []
 
+# PostgreSQL is used only by the tests that need it. It matches compose.yaml,
+# so start it with: docker compose up -d --wait
+POSTGRES: dict[str, Any] = {
+    "ENGINE": "django.db.backends.postgresql",
+    "NAME": "mcpz",
+    "HOST": "localhost",
+    "PORT": "55432",
+    "USER": "postgres",
+    "PASSWORD": "postgres",
+    # Set up without the default database, for tests that use only this.
+    "TEST": {"DEPENDENCIES": []},
+}
+
 DATABASES: dict[str, dict[str, Any]] = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": ":memory:",
     },
-    # PostgreSQL is used only by the tests that need it. It matches
-    # compose.yaml, so start it with: docker compose up -d --wait
-    "postgres": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": "mcpz",
-        "HOST": "localhost",
-        "PORT": "55432",
-        "USER": "postgres",
-        "PASSWORD": "postgres",
-        # Set up without the default database, for tests that use only this.
-        "TEST": {"DEPENDENCIES": []},
-    },
+    "postgres": POSTGRES,
 }
 
 INSTALLED_APPS = [
@@ -63,3 +65,8 @@ ROOT_URLCONF = "tests.urls"
 
 USE_TZ = True
 STATIC_URL = "static/"
+
+SILENCED_SYSTEM_CHECKS = [
+    # “SQLite does not support comments on tables”
+    "models.W046",
+]
